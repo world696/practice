@@ -18,3 +18,27 @@ const maxArea = function (height) {
 
 console.log(maxArea([1,8,6,2,5,4,8,3,7]))
 console.log(maxArea([1,1]));
+
+/**
+ * 双指针
+ * 指针初始指向数组两端开始和结束的元素，然后计算两个之间的最小值距离；指向元素值小的 指针指向前一元素，计算同上；直到两个指针指向同一元素结束
+ * @param {*} height []
+ */
+const maxArea2 = function(height = []) {
+    let left = 0
+    let right = height.length - 1
+    let maxAreaNum = 0
+    while(left < right) {
+        if (height[left] >= height[right]) {
+            maxAreaNum = Math.max(maxAreaNum, height[right] * (right - left))
+            right--
+        } else {
+            maxAreaNum = Math.max(maxAreaNum, height[left] * (left - right))
+            left++
+        }
+    }
+    return maxAreaNum
+}
+
+console.log(maxArea2([1,8,6,2,5,4,8,3,7]))
+console.log(maxArea2([1,1]));
