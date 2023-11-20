@@ -1,6 +1,6 @@
 
 /**
- * 获取最长字串长度
+ * 【03】获取最长字串长度
  * @param {*} str 字符串
  * @returns number 字符串长度
  * 时间复杂度 
@@ -19,4 +19,4 @@ const lengthOfLongstring = function(str) {
     return max
 }
 
-console.log(lengthOfLongstring('abcabcbb'));
+console.log(lengthOfLongstring('abcabcbb'))
