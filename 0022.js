@@ -2,7 +2,9 @@
  * 【括号生成】
  * @param {number} n
  * @return {string[]}
- * 【回溯 DFS】
+ * 【回溯 DFS】递归
+ * 1）递归结束的判断是 构建的字符串的长度为2n
+ * 2) 可选择 ）的条件是 （  的数量 必须< ) 的数量才可以；否则 肯定是不符合条件的
  */
 const generateParenthesis = function (n) {
   const res = [];
