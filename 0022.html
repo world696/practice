@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8" />
+  <title>括号生成可视化</title>
+  <style>
+    body {
+      background: #fafafa;
+      font-family: Consolas, monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+    }
+    h2 {
+      color: #3e7fff;
+    }
+    .tree {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      font-size: 14px;
+      white-space: pre;
+    }
+    .node {
+      margin: 4px 0;
+      transition: all 0.3s ease;
+    }
+    .valid {
+      color: #2ecc71;
+      font-weight: bold;
+    }
+    .path {
+      color: #555;
+    }
+    button {
+      background: #3e7fff;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      padding: 8px 16px;
+      margin-bottom: 16px;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    button:hover {
+      background: #2b5fd1;
+    }
+  </style>
+</head>
+<body>
+  <h2>🎯 括号生成可视化 (n=3)</h2>
+  <button onclick="start()">开始生成</button>
+  <div id="tree" class="tree"></div>
+
+  <script>
+    async function generateParenthesisVisual(n) {
+      const tree = document.getElementById('tree');
+      tree.innerHTML = '';
+
+      const delay = (ms) => new Promise(r => setTimeout(r, ms));
+
+      const res = [];
+
+      async function backtrack(path, left, right, depth) {
+        const node = document.createElement('div');
+        node.className = 'node';
+        node.innerHTML = '&nbsp;'.repeat(depth * 4) +
+          `<span class="path">path="${path}"</span> | left=${left}, right=${right}`;
+        tree.appendChild(node);
+        window.scrollTo(0, document.body.scrollHeight);
+        await delay(300);
+
+        // 如果构建完成，标记绿色节点
+        if (path.length === 2 * n) {
+          node.classList.add('valid');
+          node.textContent += ' ✅ valid';
+          res.push(path);
+          return;
+        }
+
+        if (left < n) {
+          const branch = document.createElement('div');
+          branch.innerHTML = '&nbsp;'.repeat(depth * 4) + '→ add "("';
+          tree.appendChild(branch);
+          await delay(300);
+          await backtrack(path + '(', left + 1, right, depth + 1);
+        }
+
+        if (right < left) {
+          const branch = document.createElement('div');
+          branch.innerHTML = '&nbsp;'.repeat(depth * 4) + '→ add ")"';
+          tree.appendChild(branch);
+          await delay(300);
+          await backtrack(path + ')', left, right + 1, depth + 1);
+        }
+
+        const back = document.createElement('div');
+        back.innerHTML = '&nbsp;'.repeat(depth * 4) + `⬅ backtrack from "${path}"`;
+        back.style.color = '#999';
+        tree.appendChild(back);
+        await delay(200);
+      }
+
+      await backtrack('', 0, 0, 0);
+      console.log('结果:', res);
+    }
+
+    function start() {
+      generateParenthesisVisual(3);
+    }
+  </script>
+</body>
+</html>

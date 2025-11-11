@@ -1,0 +1,23 @@
+{
+  "name": "click_hei_firework",
+  "description": "Just for HeiHei",
+  "version": "1.0",
+  "manifest_version": 3,
+  "icons": {
+    "48": "images/heihei.jpg"
+  },
+  "content_scripts": [
+    {
+        "js": ["scripts/content.js"],
+        "css": ["style.scss"],
+        "matches": ["<all_urls>"],
+        "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["images/heihei.jpg"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}

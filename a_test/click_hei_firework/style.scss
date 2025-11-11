@@ -1,0 +1,21 @@
+/* 保证我们的元素不会影响页面布局，指针事件尽量透明 */
+.cf-container {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none; /* 不阻塞页面交互 */
+  z-index: 2147483647; /* 尽量置顶 */
+}
+
+.cf-click-img {
+  position: fixed;
+  width: 48px;
+  height: 48px;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  will-change: transform, opacity;
+  transition: transform 600ms cubic-bezier(.2,.8,.2,1), opacity 600ms;
+  opacity: 1;
+}
