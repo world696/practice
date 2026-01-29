@@ -5,14 +5,17 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start:mcp": "node src/langchain-mcp-test.mjs"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
     "@langchain/core": "^1.1.9",
+    "@langchain/mcp-adapters": "^1.1.2",
     "@langchain/openai": "^1.2.0",
+    "@modelcontextprotocol/sdk": "^1.25.3",
     "chalk": "^5.6.2",
     "dotenv": "^17.2.3",
     "zod": "^4.3.5"
