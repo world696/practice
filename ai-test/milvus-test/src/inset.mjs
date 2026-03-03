@@ -36,8 +36,9 @@ const embeddings = new OpenAIEmbeddings({
   dimensions: VECTOR_DIM,
 });
 
+// 基本连接（本地部署）
 const client = new MilvusClient({
-  address: "localhost:19530",
+  address: "localhost:19530", // 19530 是 Milvus 默认 gRPC 端口。
 });
 
 async function getEmbedding(text) {
@@ -51,7 +52,16 @@ async function main() {
     await client.connectPromise;
     console.log("✓ Connected\n");
 
-    // 创建集合
+    // 创建集合  MySQL 表 ≈ Milvus Collection
+    /**
+     * data_type:数据类型;FloatVector-向量字段
+     *  DataType.Int64
+        DataType.FloatVector
+        DataType.VarChar
+        DataType.Bool
+        DataType.Float
+     * dim: 向量维度； 向量维度必须和 embedding 模型一致。
+     */
     console.log("Creating collection...");
     await client.createCollection({
       collection_name: COLLECTION_NAME,
@@ -79,11 +89,26 @@ async function main() {
 
     // 创建索引
     console.log("\nCreating index...");
+    /**
+     * index_type：向量索引算法类型；
+      *   FLAT：不建索引；暴力全量扫描（Brute Force）；精确搜索
+      *   IVF_FLAT：分桶索引
+      *   HNSW：小世界图索引
+      *   IVF_SQ8： 数据超大（千万级）；内存有限
+      *   IVF_PQ：亿级数据：对精度容忍
+      *   DISKANN：用于超大规模磁盘索引。内存小，延迟稍高
+      * metric_type：向量之间的距离计算方式；
+      *   L2欧氏距离： 距离越小越相似；常用于图像向量
+      *   IP内积：越大越相似；适用于已归一化向量
+      *   COSINE：衡量方向相似度；与向量长度无关；NLP 语义搜索最常用
+      *   HAMMING：用于二进制向量。
+      *   JACCARD： 集合相似度。
+     */
     await client.createIndex({
       collection_name: COLLECTION_NAME,
       field_name: "vector",
       index_type: IndexType.IVF_FLAT,
-      metric_type: MetricType.COSINE,
+      metric_type: MetricType.COSINE, // metric_type 指定用余弦相似度作为距离度量
       params: { nlist: 1024 },
     });
     console.log("Index created");
