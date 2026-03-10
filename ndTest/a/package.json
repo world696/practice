@@ -12,6 +12,7 @@
   "license": "ISC",
   "dependencies": {
     "cross-env": "^10.1.0",
+    "http-proxy-middleware": "^3.0.5",
     "jsdom": "^28.1.0"
   }
 }
