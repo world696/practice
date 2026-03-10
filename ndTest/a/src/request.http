@@ -1,0 +1,9 @@
+GET http://localhost:98/get?a=1&b=2 
+
+###
+POST http://localhost:98/post
+Content-Type: application/json
+
+{
+ "name":"tom"
+}
