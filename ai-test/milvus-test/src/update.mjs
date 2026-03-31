@@ -43,7 +43,7 @@ async function main() {
 
     await client.upsert({
       collection_name: COLLECTION_NAME,
-      data: updateData,
+      data: [updateData],
     });
     console.log(`✓ Updated diary entry: ${updateId}`);
     console.log(`  New content: ${updatedContent.content}`);

@@ -1,27 +1,11 @@
-import "dotenv/cofig";
+import "dotenv/config";
 import { MilvusClient } from "@zilliz/milvus2-sdk-node";
-import { OpenAIEmbeddings } from "@langchain/openai";
 
 const COLLECTION_NAME = "ai_diary";
-const VECTOR_DIM = 1024;
-
-const embeddings = new OpenAIEmbeddings({
-  apiKey: process.env.OPENAI_API_KEY,
-  model: process.env.EMBEDDINGS_MODEL_NAME,
-  configuation: {
-    baseURL: process.env.OPENAI_BASE_URL,
-  },
-  dimensions: VECTOR_DIM,
-});
 
 const client = new MilvusClient({
   address: "localhost:19530",
 });
-
-async function getEmbedding(text) {
-  const result = embeddings.embedQuery(text);
-  return result;
-}
 
 async function main() {
   try {
@@ -29,7 +13,7 @@ async function main() {
 
     // 删除单条数据
     console.log("Deleting diary entry...");
-    const deleteId = "diary_005";
+    const deleteId = "diary_001";
 
     const result = await client.delete({
       collection_name: COLLECTION_NAME,

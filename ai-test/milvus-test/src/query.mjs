@@ -1,9 +1,7 @@
 import "dotenv/config";
 import {
   MilvusClient,
-  DataType,
   MetricType,
-  IndexType,
 } from "@zilliz/milvus2-sdk-node";
 import { OpenAIEmbeddings } from "@langchain/openai";
 
@@ -41,7 +39,7 @@ async function main() {
 
     const queryVector = await getEmbedding(query); //  query 向量化，做余弦相似度的检索
     const searchResult = await client.search({
-      ollection_name: COLLECTION_NAME,
+      collection_name: COLLECTION_NAME,
       vector: queryVector,
       limit: 2,
       metric_type: MetricType.COSINE,
@@ -57,7 +55,7 @@ async function main() {
       console.log(`   Tags: ${item.tags?.join(", ")}`);
       console.log(`   Content: ${item.content}\n`);
     });
-  } catch (err) {
+  } catch (error) {
     console.error("Error:", error.message);
   }
 }
