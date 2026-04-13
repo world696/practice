@@ -13,7 +13,7 @@ const model = new ChatOpenAI({
 });
 
 async function inMemoryDemo() {
-  const history = new InMemoryChatMessageHistory();
+  const history = new InMemoryChatMessageHistory(); // 存内存里
 
   const systemMessage = new SystemMessage(
     "你是一个友好、幽默的做菜助手，喜欢分享美食和烹饪技巧。"

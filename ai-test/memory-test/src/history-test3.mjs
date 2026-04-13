@@ -23,7 +23,7 @@ async function fileHistoryDemo() {
     "你是一个友好、幽默的做菜助手，喜欢分享美食和烹饪技巧。"
   );
 
-  
+  // 存文件里面
   const restoredHistory = new FileSystemChatMessageHistory({
     filePath: filePath,
     sessionId: sessionId,

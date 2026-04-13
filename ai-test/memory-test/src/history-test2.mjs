@@ -24,6 +24,7 @@ async function fileHistoryDemo() {
   );
 
   console.log("[第一轮对话]");
+  // 存文件里面
   const history = new FileSystemChatMessageHistory({
     filePath: filePath,
     sessionId: sessionId,
