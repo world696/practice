@@ -71,8 +71,9 @@ export class AiService {
     @Inject('QUERY_USER_TOOL')
     private readonly queryUserTool: StructuredToolInterface,
     @Inject('SEND_MAIL_TOOL') private readonly sendMailTool,
+    @Inject('WEB_SEARCH_TOOL') private readonly webSearchTool: any,
   ) {
-    this.modelWithTools = model.bindTools([this.queryUserTool, this.sendMailTool]);
+    this.modelWithTools = model.bindTools([this.queryUserTool, this.sendMailTool, this.webSearchTool]);
   }
 
   async runChain(query: string): Promise<string> {
@@ -121,6 +122,18 @@ export class AiService {
           );
         } else if (toolName === 'send_mail') {
           const result = await this.sendMailTool.invoke(toolCall.args);
+          if (!toolCallId) {
+            throw new Error('Tool call id is missing');
+          }
+          messages.push(
+            new ToolMessage({
+              tool_call_id: toolCallId,
+              name: toolName,
+              content: result,
+            }),
+          );
+        } else if (toolName === 'web_search') {
+          const result = await this.webSearchTool.invoke(toolCall.args);
           if (!toolCallId) {
             throw new Error('Tool call id is missing');
           }
@@ -192,6 +205,18 @@ export class AiService {
           );
         } else if (toolName === 'send_mail') {
           const result = await this.sendMailTool.invoke(toolCall.args);
+          if (!toolCallId) {
+            throw new Error('Tool call id is missing');
+          }
+          messages.push(
+            new ToolMessage({
+              tool_call_id: toolCallId,
+              name: toolName,
+              content: result,
+            }),
+          );
+        } else if (toolName === 'web_search') {
+          const result = await this.webSearchTool.invoke(toolCall.args);
           if (!toolCallId) {
             throw new Error('Tool call id is missing');
           }

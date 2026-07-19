@@ -4,9 +4,14 @@ import { AppService } from './app.service';
 import { AiModule } from './ai/ai.module';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MailerModule } from '@nestjs-modules/mailer';
+import { ServeStaticModule } from '@nestjs/serve-static';
+import { join } from 'path';
 
 @Module({
   imports: [
+    ServeStaticModule.forRoot({
+      rootPath: join(__dirname, '..', 'public'),
+    }),
     AiModule,
     ConfigModule.forRoot({
       isGlobal: true,

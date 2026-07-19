@@ -102,6 +102,99 @@ import { MailerService } from '@nestjs-modules/mailer';
       },
       inject: [MailerService, ConfigService],
     },
+    {
+      provide: 'WEB_SEARCH_TOOL',
+      useFactory: (configService: ConfigService) => {
+        const webSearchArgsSchema = z.object({
+          query: z
+            .string()
+            .min(1)
+            .describe('搜索关键词, 例如: 公司年报,某个时间等'),
+          count: z
+            .number()
+            .int()
+            .min(1)
+            .max(20)
+            .optional()
+            .describe('返回的搜索结果数量, 默认 10条 '),
+        });
+
+        return tool(
+          async ({ query, count }: { query: string; count?: number }) => {
+            const apiKey = configService.get<string>('BOCHA_API_KEY');
+
+            if (!apiKey) {
+              return 'bocha web search 的api key 未配置';
+            }
+
+            const url = 'https://api.bocha.cn/v1/web-search';
+
+            const body = {
+              query,
+              summary: true,
+              freshness: 'noLimit',
+              count: count ?? 10,
+            };
+
+            const response = await fetch(url, {
+              method: 'post',
+              headers: {
+                Authorization: `Bearer ${apiKey}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify(body),
+            });
+
+            if (!response.ok) {
+              const errorText = await response.text();
+              return `搜索api失败 状态码: ${response.status},错误信息${errorText}`;
+            }
+
+            let json: any;
+            try {
+              json = await response.json();
+            } catch (e) {
+              return `搜索API请求失败,原因是:搜索结果解析失败 ${(e as Error).message}`;
+            }
+
+            try {
+              if (json.code !== 200 || !json.data) {
+                return `搜索API请求失败,原因是 ${json.msg ?? 'error'}`;
+              }
+
+              const webpages = json.data.webpages?.value ?? [];
+              if (!webpages.length) {
+                return '未找到';
+              }
+
+              const formatted = webpages
+                .map(
+                  (
+                    page: any,
+                    idx: number,
+                  ) => `引用: ${idx + 1} 标题: ${page.name}
+URL: ${page.url}
+摘要: ${page.summary}
+网站名称: ${page.siteName}
+网站图标: ${page.siteIcon}
+发布时间: ${page.dateLastCrawled}`,
+                )
+                .join('\n\n');
+              return formatted;
+            } catch (e) {
+              return `搜索 API 请求失败，原因是：搜索结果解析失败 ${(e as Error).message}`;
+            }
+          },
+          {
+            name: 'web_search',
+            description:
+              '使用 Bocha Web Search API 搜索互联网网页。输入为搜索关键词（可选 count 指定结果数量），返回包含标题、URL、摘要、网站名称、图标和时间等信息的结果列表。',
+            schema: webSearchArgsSchema,
+          },
+        );
+      },
+      inject: [ConfigService],
+    },
   ],
 })
 export class AiModule {}
