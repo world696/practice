@@ -1,11 +1,16 @@
-import dotenv from "dotenv";
+import "dotenv/config";
 import tencentcloud from "tencentcloud-sdk-nodejs-tts";
-import fs from "fs";
+import fs from "node:fs";
 
 const secretId = process.env.SECRET_ID;
 const secretKey = process.env.SECRET_KEY;
 
-const TtsClient = tencentcloud.Tts.v20190823.Client;
+if (!secretId || !secretKey) {
+    console.error("缺少 SECRET_ID 或 SECRET_KEY，请检查项目根目录 .env");
+    process.exit(1);
+}
+
+const TtsClient = tencentcloud.tts.v20190823.Client;
 
 const client = new TtsClient({
     credential: {
@@ -23,7 +28,7 @@ const client = new TtsClient({
 const params = {
     Text: "Hello, world!",
     SessionId: "session-001",
-    VoiceType: "502006", // 输出音色类型
+    VoiceType: 502006, // 输出音色类型
     Codec: "mp3", // 指定输出mp3
 }
 
