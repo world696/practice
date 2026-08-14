@@ -1,0 +1,15 @@
+services:
+  neo4j:
+    image: neo4j:latest
+    container_name: neo4j-container
+    ports:
+      - "7474:7474" # web interface
+      - "7687:7687" # bolt interface
+    environment:
+      - NEO4J_AUTH=neo4j/12345678 # 账号 neo4j 密码： 12345678
+      - NEO4J_PLUGINS=["appoc"] # 安装必备插件
+      - NEO4J_dbms_security_procedures_unrestricted=algo.*
+    - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/neo4j/data:/data
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/neo4j/logs:/logs
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/neo4j/conf:/conf
+    restart: unless-stopped
