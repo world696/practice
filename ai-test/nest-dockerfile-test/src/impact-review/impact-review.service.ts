@@ -1,7 +1,7 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { execFile } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
 import {
@@ -15,6 +15,7 @@ import {
 
 const execFileAsync = promisify(execFile);
 const TEST_COMMANDS: Record<TestType, string> = {
+  frontend: 'browser check (URL, title, required text)',
   unit: 'npm test -- --runInBand',
   integration: 'npm run test:integration -- --runInBand',
   e2e: 'npm run test:e2e -- --runInBand',
@@ -85,6 +86,12 @@ export class ImpactReviewService {
     if (!existsSync(input.repositoryPath)) {
       throw new BadRequestException('repositoryPath does not exist');
     }
+    if ((input.testTypes || []).includes('frontend') && !input.frontendUrl) {
+      throw new BadRequestException('frontendUrl is required when frontend test is selected');
+    }
+    if (input.frontendUrl && !/^https?:\/\//.test(input.frontendUrl)) {
+      throw new BadRequestException('frontendUrl must start with http:// or https://');
+    }
     for (const type of input.testTypes || []) {
       if (!TEST_COMMANDS[type]) throw new BadRequestException(`Unsupported test type: ${type}`);
     }
@@ -138,9 +145,14 @@ export class ImpactReviewService {
     }
     for (const item of review.testPlan.filter((candidate) => candidate.selected)) {
       const started = Date.now();
+      if (item.type === 'frontend') {
+        await this.executeFrontendCheck(review, started);
+        continue;
+      }
       const scriptName = item.type === 'build' ? 'build' : item.type === 'e2e' ? 'test:e2e' : `test:${item.type}`;
-      if (!scripts[scriptName] && item.type !== 'unit') {
-        review.results.push({ type: item.type, status: 'skipped', durationMs: Date.now() - started, output: `No ${scriptName} script found` });
+      const hasScript = item.type === 'unit' ? Boolean(scripts.test) : Boolean(scripts[scriptName]);
+      if (!hasScript) {
+        review.results.push({ type: item.type, status: 'skipped', durationMs: Date.now() - started, output: `No ${item.type === 'unit' ? 'test' : scriptName} script found` });
         continue;
       }
       try {
@@ -151,6 +163,33 @@ export class ImpactReviewService {
       } catch (error: any) {
         review.results.push({ type: item.type, status: 'failed', durationMs: Date.now() - started, output: `${error.stdout || ''}`.slice(-4000), error: error.message });
       }
+    }
+  }
+
+  private async executeFrontendCheck(review: ReviewRecord, started: number) {
+    if (!review.request.frontendUrl) {
+      review.results.push({ type: 'frontend', status: 'skipped', durationMs: 0, output: 'No frontendUrl provided' });
+      return;
+    }
+    try {
+      const response = await fetch(review.request.frontendUrl, { signal: AbortSignal.timeout(30_000) });
+      const html = await response.text();
+      const check = review.request.frontendCheck || {};
+      const missingText = (check.requiredText || []).filter((text) => !html.includes(text));
+      const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.trim() || '';
+      const expectedStatus = check.expectedStatus ?? 200;
+      const titleOk = !check.expectedTitle || title === check.expectedTitle;
+      const passed = response.status === expectedStatus && missingText.length === 0 && titleOk;
+      review.results.push({
+        type: 'frontend',
+        status: passed ? 'passed' : 'failed',
+        durationMs: Date.now() - started,
+        output: `HTTP ${response.status}; title: ${title || '(empty)'}`,
+        error: passed ? undefined : `页面检查失败：${missingText.length ? `缺少文案 ${missingText.join(', ')}；` : ''}${titleOk ? '' : `标题不匹配，实际为「${title}」；`}`,
+        details: { url: review.request.frontendUrl, status: response.status, title, missingText },
+      });
+    } catch (error) {
+      review.results.push({ type: 'frontend', status: 'failed', durationMs: Date.now() - started, error: error instanceof Error ? error.message : String(error) });
     }
   }
 
@@ -198,12 +237,12 @@ export class ImpactReviewService {
   private buildTestPlan(review: ReviewRecord): TestPlanItem[] {
     const requested = review.request.testTypes;
     const critical = review.impactAreas.some((area) => area.risk === 'critical');
-    const selected = new Set(requested?.length ? requested : (['unit', 'integration', 'e2e', 'security', 'build'] as TestType[]));
+    const selected = new Set(requested?.length ? requested : (['frontend', 'unit', 'integration', 'e2e', 'security', 'build'] as TestType[]));
     return (Object.keys(TEST_COMMANDS) as TestType[]).map((type) => ({
       type,
-      reason: type === 'security' && critical ? '存在高风险影响点，必须执行安全回归' : `基于 ${review.impactAreas.length} 个影响区域自动选择`,
+      reason: type === 'frontend' ? (review.request.frontendUrl ? '验证目标页面可达、标题和关键文案' : '未提供前端地址，跳过页面检查') : type === 'security' && critical ? '存在高风险影响点，必须执行安全回归' : `基于 ${review.impactAreas.length} 个影响区域自动选择`,
       command: TEST_COMMANDS[type],
-      selected: selected.has(type) || (type === 'security' && critical),
+      selected: (type === 'frontend' ? Boolean(review.request.frontendUrl) : selected.has(type)) || (type === 'security' && critical),
     }));
   }
 

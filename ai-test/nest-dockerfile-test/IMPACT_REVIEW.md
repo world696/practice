@@ -7,6 +7,8 @@ pnpm install
 pnpm start:dev
 ```
 
+启动后直接打开 `http://localhost:3000/console/`（如果 3000 被占用，可使用 `PORT=3001 pnpm start:dev`，然后打开 `http://localhost:3001/console/`）。控制台可以填写 commit、环境、前端页面地址、期望标题和关键文案，点击一次即可查看分析与测试结果。
+
 ## 创建审查任务
 
 ```bash
@@ -21,6 +23,8 @@ curl -X POST http://localhost:3000/impact-reviews \
     "deploy": false
   }'
 ```
+
+勾选 `frontend` 后，服务会检查目标页面 HTTP 状态、HTML title 和必需文案；页面验证结果中提供“打开页面做视觉复核”链接。当前版本不依赖前端项目的测试脚本，适合先验证已发布页面是否可达且内容正确。
 
 任务会异步完成。通过 `GET /impact-reviews/:id` 查看 commit 信息、变更文件、影响区域、风险等级、测试计划、测试结果和部署状态；失败任务可调用 `POST /impact-reviews/:id/retry`。
 

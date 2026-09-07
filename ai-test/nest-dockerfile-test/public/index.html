@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>对抗性审查 · 页面验证台</title>
+    <link rel="stylesheet" href="/console/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <div class="eyebrow">ADVERSARIAL REVIEW</div>
+          <h1>页面发布验证台</h1>
+          <p>选择已提交的 commit，自动分析影响点并验证前端页面。</p>
+        </div>
+        <span class="live"><i></i> 本地服务在线</span>
+      </header>
+
+      <section class="card form-card">
+        <div class="section-title"><span class="step">1</span><div><h2>创建一次验证</h2><small>不需要记 curl 命令，填完直接开始</small></div></div>
+        <form id="review-form">
+          <div class="grid two">
+            <label>代码仓库路径<input id="repositoryPath" required value="/Users/qy/Desktop/project/practice" /></label>
+            <label>Commit<input id="commit" required placeholder="例如 fe7d64a" /></label>
+            <label>基准 Commit <span class="muted">可选</span><input id="baseCommit" placeholder="默认使用 commit 的父提交" /></label>
+            <label>验证环境<select id="environment"><option>staging</option><option>test</option><option>production</option></select></label>
+          </div>
+          <label>前端页面地址 <span class="muted">用于页面可达性和文案验证</span><input id="frontendUrl" placeholder="例如 http://localhost:5173/" /></label>
+          <div class="grid two compact">
+            <label>期望页面标题<input id="expectedTitle" placeholder="例如 首页" /></label>
+            <label>必须出现的文案<input id="requiredText" placeholder="多个文案用逗号分隔" /></label>
+          </div>
+          <div class="checks">
+            <span class="label">执行测试</span>
+            <label class="check"><input type="checkbox" value="frontend" checked /> 页面验证</label>
+            <label class="check"><input type="checkbox" value="unit" checked /> 单元</label>
+            <label class="check"><input type="checkbox" value="e2e" /> E2E</label>
+            <label class="check"><input type="checkbox" value="security" checked /> 安全</label>
+            <label class="check"><input type="checkbox" value="build" /> 构建</label>
+          </div>
+          <button class="primary" type="submit"><span>▶</span> 开始影响分析与页面验证</button>
+          <div id="form-error" class="error hidden"></div>
+        </form>
+      </section>
+
+      <section class="card hidden" id="result-card">
+        <div class="result-head"><div class="section-title"><span class="step purple">2</span><div><h2>验证结果</h2><small id="result-subtitle">任务处理中</small></div></div><span id="status" class="status">处理中</span></div>
+        <div class="metrics" id="metrics"></div>
+        <div class="result-grid"><div><h3>页面验证</h3><div id="frontend-result" class="panel muted-panel">等待结果…</div></div><div><h3>影响点</h3><div id="impact-list" class="panel">等待分析…</div></div></div>
+        <div class="result-grid"><div><h3>测试计划</h3><div id="plan-list" class="panel">等待生成…</div></div><div><h3>变更文件</h3><div id="file-list" class="panel">等待分析…</div></div></div>
+        <details><summary>查看任务 JSON</summary><pre id="raw-result"></pre></details>
+      </section>
+      <p class="footnote">当前版本验证页面的 HTTP 状态、标题和关键文案；页面地址可直接打开做视觉复核。部署平台接入后可继续扩展为发布后验证。</p>
+    </main>
+    <script src="/console/app.js"></script>
+  </body>
+</html>

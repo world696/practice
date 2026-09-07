@@ -6,7 +6,13 @@ export type ReviewStatus =
   | 'passed'
   | 'failed';
 
-export type TestType = 'unit' | 'integration' | 'e2e' | 'security' | 'build';
+export type TestType = 'frontend' | 'unit' | 'integration' | 'e2e' | 'security' | 'build';
+
+export interface FrontendCheck {
+  requiredText?: string[];
+  expectedTitle?: string;
+  expectedStatus?: number;
+}
 
 export interface CreateReviewDto {
   repositoryPath: string;
@@ -15,6 +21,8 @@ export interface CreateReviewDto {
   environment?: string;
   testTypes?: TestType[];
   deploy?: boolean;
+  frontendUrl?: string;
+  frontendCheck?: FrontendCheck;
 }
 
 export interface ChangedFile {
@@ -59,6 +67,7 @@ export interface ReviewRecord {
     durationMs: number;
     output?: string;
     error?: string;
+    details?: Record<string, unknown>;
   }>;
   error?: string;
 }
