@@ -12,6 +12,19 @@ export interface FrontendCheck {
   requiredText?: string[];
   expectedTitle?: string;
   expectedStatus?: number;
+  clickSelectors?: string[];
+}
+
+export interface BrowserAuthInput {
+  mode: 'bearer' | 'cookie';
+  token?: string;
+  cookieName?: string;
+  cookieValue?: string;
+}
+
+export interface BrowserAuthSummary {
+  mode: BrowserAuthInput['mode'];
+  provided: boolean;
 }
 
 export interface CreateReviewDto {
@@ -23,6 +36,7 @@ export interface CreateReviewDto {
   deploy?: boolean;
   frontendUrl?: string;
   frontendCheck?: FrontendCheck;
+  browserAuth?: BrowserAuthInput;
   remote?: string;
   remoteBranch?: string;
   mergeRemote?: boolean;
@@ -54,12 +68,14 @@ export interface ReviewRecord {
   createdAt: string;
   updatedAt: string;
   status: ReviewStatus;
-  request: CreateReviewDto;
+  request: Omit<CreateReviewDto, 'browserAuth'> & { browserAuth?: BrowserAuthSummary };
   commitMessage?: string;
   resolvedCommit?: string;
   changedFiles: ChangedFile[];
   impactAreas: ImpactArea[];
   testPlan: TestPlanItem[];
+  events: BrowserEvent[];
+  screenshotReady: boolean;
   deployment: {
     requested: boolean;
     status: 'not_requested' | 'pending_adapter' | 'ready';
@@ -74,4 +90,12 @@ export interface ReviewRecord {
     details?: Record<string, unknown>;
   }>;
   error?: string;
+}
+
+export interface BrowserEvent {
+  at: string;
+  type: 'step' | 'console' | 'pageerror' | 'request' | 'response' | 'screenshot' | 'error';
+  level?: 'info' | 'warning' | 'error';
+  message: string;
+  url?: string;
 }

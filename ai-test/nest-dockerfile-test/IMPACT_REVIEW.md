@@ -28,6 +28,8 @@ curl -X POST http://localhost:3000/impact-reviews \
 
 填写远程分支后，服务会执行 `git fetch --no-tags <remote> <branch>`，以 `FETCH_HEAD` 对应的远程 commit 做分析。勾选“同步到当前分支”后，会在工作区干净且可以 fast-forward 时合并到当前分支；否则只拉取并分析，不覆盖开发者未提交的修改。
 
+前端浏览器检查使用 Playwright：会执行页面 JavaScript，监听 console/page error、失败请求和 HTTP 4xx/5xx，按配置点击 CSS selector，并生成截图。登录页面可选择 Bearer Token 或 Cookie；凭证只在本次任务的浏览器上下文中使用，不放入任务结果、不写入日志，任务结束后销毁。Bearer Token 只注入到目标页面同源请求，不发送给第三方资源。
+
 任务会异步完成。通过 `GET /impact-reviews/:id` 查看 commit 信息、变更文件、影响区域、风险等级、测试计划、测试结果和部署状态；失败任务可调用 `POST /impact-reviews/:id/retry`。
 
 ## 当前边界与遗漏项

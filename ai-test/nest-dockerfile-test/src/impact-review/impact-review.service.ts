@@ -1,10 +1,14 @@
 import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { execFile } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
+import { chromium } from 'playwright';
 import {
+  BrowserAuthInput,
+  BrowserEvent,
   ChangedFile,
   CreateReviewDto,
   ImpactArea,
@@ -26,25 +30,31 @@ const TEST_COMMANDS: Record<TestType, string> = {
 @Injectable()
 export class ImpactReviewService {
   private readonly reviews = new Map<string, ReviewRecord>();
+  private readonly browserAuth = new Map<string, BrowserAuthInput | undefined>();
+  private readonly screenshots = new Map<string, string>();
 
   create(input: CreateReviewDto) {
     this.validate(input);
     const id = randomUUID();
     const now = new Date().toISOString();
+    const { browserAuth, ...safeInput } = input;
     const record: ReviewRecord = {
       id,
       createdAt: now,
       updatedAt: now,
       status: 'queued',
       request: {
-        ...input,
+        ...safeInput,
         environment: input.environment || 'staging',
         testTypes: input.testTypes?.length ? input.testTypes : undefined,
         deploy: input.deploy ?? true,
+        browserAuth: browserAuth ? { mode: browserAuth.mode, provided: true } : undefined,
       },
       changedFiles: [],
       impactAreas: [],
       testPlan: [],
+      events: [],
+      screenshotReady: false,
       deployment: {
         requested: input.deploy ?? true,
         status: input.deploy === false ? 'not_requested' : 'pending_adapter',
@@ -53,6 +63,7 @@ export class ImpactReviewService {
       results: [],
     };
     this.reviews.set(id, record);
+    this.browserAuth.set(id, browserAuth);
     void this.run(record);
     return record;
   }
@@ -65,6 +76,13 @@ export class ImpactReviewService {
     const review = this.reviews.get(id);
     if (!review) throw new NotFoundException(`Impact review ${id} not found`);
     return review;
+  }
+
+  getScreenshotPath(id: string) {
+    this.get(id);
+    const path = this.screenshots.get(id);
+    if (!path || !existsSync(path)) throw new NotFoundException(`Screenshot for review ${id} not found`);
+    return path;
   }
 
   retry(id: string) {
@@ -92,6 +110,12 @@ export class ImpactReviewService {
     if (input.frontendUrl && !/^https?:\/\//.test(input.frontendUrl)) {
       throw new BadRequestException('frontendUrl must start with http:// or https://');
     }
+    if (input.browserAuth?.mode === 'bearer' && !input.browserAuth.token) {
+      throw new BadRequestException('Bearer Token is required for bearer authentication');
+    }
+    if (input.browserAuth?.mode === 'cookie' && (!input.browserAuth.cookieName || !input.browserAuth.cookieValue)) {
+      throw new BadRequestException('Cookie name and value are required for cookie authentication');
+    }
     for (const type of input.testTypes || []) {
       if (!TEST_COMMANDS[type]) throw new BadRequestException(`Unsupported test type: ${type}`);
     }
@@ -100,6 +124,7 @@ export class ImpactReviewService {
   private async run(review: ReviewRecord) {
     try {
       review.status = 'analyzing';
+      this.addEvent(review, { type: 'step', message: '正在解析 commit 和改动范围' });
       review.updatedAt = new Date().toISOString();
       const repo = review.request.repositoryPath;
       const commit = await this.resolveCommit(repo, review.request);
@@ -123,14 +148,17 @@ export class ImpactReviewService {
         review.deployment.status = 'pending_adapter';
         review.status = 'running';
       } else {
-        review.status = 'running';
+      review.status = 'running';
       }
+      this.addEvent(review, { type: 'step', message: review.testPlan.some((item) => item.type === 'frontend' && item.selected) ? '开始启动真实浏览器验证' : '开始执行测试计划' });
       await this.executeTests(review);
       review.status = review.results.some((result) => result.status === 'failed') ? 'failed' : 'passed';
+      this.addEvent(review, { type: 'step', message: review.status === 'passed' ? '全部选定检查完成' : '检查完成，但存在失败项', level: review.status === 'passed' ? 'info' : 'warning' });
     } catch (error) {
       review.status = 'failed';
       review.error = error instanceof Error ? error.message : String(error);
     } finally {
+      this.browserAuth.delete(review.id);
       review.updatedAt = new Date().toISOString();
     }
   }
@@ -199,26 +227,102 @@ export class ImpactReviewService {
       review.results.push({ type: 'frontend', status: 'skipped', durationMs: 0, output: 'No frontendUrl provided' });
       return;
     }
+    const systemChrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+    const browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_BROWSER_PATH || (existsSync(systemChrome) ? systemChrome : undefined) });
+    const auth = this.browserAuth.get(review.id);
+    const consoleErrors: string[] = [];
+    const consoleWarnings: string[] = [];
+    const pageErrors: string[] = [];
+    const failedRequests: string[] = [];
+    let status = 0;
+    let title = '';
     try {
-      const response = await fetch(review.request.frontendUrl, { signal: AbortSignal.timeout(30_000) });
-      const html = await response.text();
+      const target = new URL(review.request.frontendUrl);
+      const context = await browser.newContext({ ignoreHTTPSErrors: true });
+      if (auth?.mode === 'bearer' && auth.token) {
+        await context.route('**/*', async (route) => {
+          const requestUrl = new URL(route.request().url());
+          const headers = { ...route.request().headers() };
+          if (requestUrl.origin === target.origin) headers.authorization = `Bearer ${auth.token}`;
+          await route.continue({ headers });
+        });
+      }
+      if (auth?.mode === 'cookie' && auth.cookieName && auth.cookieValue) {
+        await context.addCookies([{ name: auth.cookieName, value: auth.cookieValue, domain: target.hostname, path: '/' }]);
+      }
+      const page = await context.newPage();
+      page.on('console', (message) => {
+        if (message.type() === 'error' || message.type() === 'warning') {
+          const text = message.text();
+          (message.type() === 'error' ? consoleErrors : consoleWarnings).push(text);
+          this.addEvent(review, { type: 'console', level: message.type() === 'error' ? 'error' : 'warning', message: text });
+        }
+      });
+      page.on('pageerror', (error) => {
+        pageErrors.push(error.message);
+        this.addEvent(review, { type: 'pageerror', level: 'error', message: error.message });
+      });
+      page.on('request', (request) => this.addEvent(review, { type: 'request', message: `${request.method()} ${request.url()}`, url: request.url() }));
+      page.on('requestfailed', (request) => {
+        failedRequests.push(request.url());
+        this.addEvent(review, { type: 'request', level: 'error', message: `请求失败 ${request.url()} · ${request.failure()?.errorText || 'unknown'}`, url: request.url() });
+      });
+      page.on('response', (response) => {
+        if (response.status() >= 400) {
+          failedRequests.push(response.url());
+          this.addEvent(review, { type: 'response', level: 'error', message: `HTTP ${response.status()} ${response.url()}`, url: response.url() });
+        }
+      });
+      this.addEvent(review, { type: 'step', message: `打开页面 ${review.request.frontendUrl}` });
+      const response = await page.goto(review.request.frontendUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+      status = response?.status() || 0;
+      title = await page.title();
+      this.addEvent(review, { type: 'step', message: `页面加载完成 · HTTP ${status} · 标题「${title || '(empty)'}」` });
+      try { await page.waitForLoadState('networkidle', { timeout: 10_000 }); } catch { this.addEvent(review, { type: 'step', message: '网络仍有活动，继续执行页面检查', level: 'warning' }); }
       const check = review.request.frontendCheck || {};
-      const missingText = (check.requiredText || []).filter((text) => !html.includes(text));
-      const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.trim() || '';
+      const bodyText = await page.locator('body').innerText().catch(() => '');
+      const missingText = (check.requiredText || []).filter((text) => !bodyText.includes(text));
       const expectedStatus = check.expectedStatus ?? 200;
       const titleOk = !check.expectedTitle || title === check.expectedTitle;
-      const passed = response.status === expectedStatus && missingText.length === 0 && titleOk;
+      for (const selector of check.clickSelectors || []) {
+        this.addEvent(review, { type: 'step', message: `点击元素 ${selector}` });
+        await page.locator(selector).first().click({ timeout: 10_000 });
+      }
+      const screenshotDir = join(tmpdir(), 'impact-review-screenshots');
+      mkdirSync(screenshotDir, { recursive: true });
+      const screenshotPath = join(screenshotDir, `${review.id}.png`);
+      await page.screenshot({ path: screenshotPath, fullPage: true });
+      this.screenshots.set(review.id, screenshotPath);
+      review.screenshotReady = true;
+      this.addEvent(review, { type: 'screenshot', message: '已生成页面截图' });
+      const passed = status === expectedStatus && missingText.length === 0 && titleOk && consoleErrors.length === 0 && pageErrors.length === 0 && failedRequests.length === 0;
       review.results.push({
         type: 'frontend',
         status: passed ? 'passed' : 'failed',
         durationMs: Date.now() - started,
-        output: `HTTP ${response.status}; title: ${title || '(empty)'}`,
-        error: passed ? undefined : `页面检查失败：${missingText.length ? `缺少文案 ${missingText.join(', ')}；` : ''}${titleOk ? '' : `标题不匹配，实际为「${title}」；`}`,
-        details: { url: review.request.frontendUrl, status: response.status, title, missingText },
+        output: `HTTP ${status}; title: ${title || '(empty)'}; console errors: ${consoleErrors.length}; failed requests: ${failedRequests.length}`,
+        error: passed ? undefined : `页面检查失败：${missingText.length ? `缺少文案 ${missingText.join(', ')}；` : ''}${titleOk ? '' : `标题不匹配，实际为「${title}」；`}${consoleErrors.length ? `控制台错误 ${consoleErrors.length} 个；` : ''}${pageErrors.length ? `页面异常 ${pageErrors.length} 个；` : ''}${failedRequests.length ? `失败请求 ${failedRequests.length} 个；` : ''}`,
+        details: { url: review.request.frontendUrl, status, title, missingText, consoleErrors: consoleErrors.length, consoleWarnings: consoleWarnings.length, pageErrors: pageErrors.length, failedRequests: failedRequests.length, screenshotReady: true },
       });
     } catch (error) {
-      review.results.push({ type: 'frontend', status: 'failed', durationMs: Date.now() - started, error: error instanceof Error ? error.message : String(error) });
+      this.addEvent(review, { type: 'error', level: 'error', message: error instanceof Error ? error.message : String(error) });
+      review.results.push({ type: 'frontend', status: 'failed', durationMs: Date.now() - started, error: this.redact(review, error instanceof Error ? error.message : String(error)) });
+    } finally {
+      await browser.close();
     }
+  }
+
+  private addEvent(review: ReviewRecord, event: Omit<BrowserEvent, 'at'>) {
+    if (review.events.length >= 250) return;
+    review.events.push({ ...event, message: this.redact(review, event.message), at: new Date().toISOString() });
+    review.updatedAt = new Date().toISOString();
+  }
+
+  private redact(review: ReviewRecord, value: string) {
+    let safe = value;
+    const auth = this.browserAuth.get(review.id);
+    for (const secret of [auth?.token, auth?.cookieValue].filter(Boolean) as string[]) safe = safe.split(secret).join('[REDACTED]');
+    return safe;
   }
 
   private parseChangedFiles(raw: string, diff: string): ChangedFile[] {
