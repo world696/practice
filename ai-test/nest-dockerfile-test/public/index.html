@@ -23,15 +23,17 @@
           <div class="card-heading"><div><span class="kicker">01 / INPUT</span><h2>验证目标</h2></div><span class="required-note">* 必填</span></div>
           <form id="review-form">
             <label class="field">代码仓库路径 <span class="required">*</span><input id="repositoryPath" required value="/Users/qy/Desktop/project/practice" /></label>
-            <label class="field">Commit <span class="required">*</span><input id="commit" required placeholder="例如 fe7d64a" /></label>
+            <label class="field">Commit <span class="muted">和远程分支二选一</span><input id="commit" placeholder="例如 fe7d64a，可留空" /></label>
             <label class="field">前端页面地址 <span class="muted">可选</span><input id="frontendUrl" placeholder="http://localhost:5173/" /></label>
+            <div class="field-row"><label class="field">远程仓库 <span class="muted">可选</span><input id="remote" value="origin" placeholder="origin" /></label><label class="field">远程分支 <span class="muted">填写后自动拉取</span><input id="remoteBranch" placeholder="feature/login" /></label></div>
+            <label class="merge-option"><input id="mergeRemote" type="checkbox" /> 拉取后同步到当前分支 <span>仅允许工作区干净且可 fast-forward</span></label>
             <div class="field-row"><label class="field">环境<select id="environment"><option>staging</option><option>test</option><option>production</option></select></label><label class="field">基准 commit<input id="baseCommit" placeholder="默认父提交" /></label></div>
             <details class="advanced"><summary>页面断言 <span>标题 / 关键文案</span></summary><div class="advanced-body"><label class="field">期望标题<input id="expectedTitle" placeholder="例如 首页" /></label><label class="field">必须出现的文案<input id="requiredText" placeholder="多个文案用逗号分隔" /></label></div></details>
             <div class="run-options"><span class="field-label">执行测试</span><div class="checks"><label class="check active"><input type="checkbox" value="frontend" checked /> 页面</label><label class="check active"><input type="checkbox" value="unit" checked /> 单元</label><label class="check"><input type="checkbox" value="e2e" /> E2E</label><label class="check active"><input type="checkbox" value="security" checked /> 安全</label><label class="check"><input type="checkbox" value="build" /> 构建</label></div></div>
             <button class="primary" type="submit"><span>开始验证</span><b>↗</b></button>
             <div id="form-error" class="error hidden"></div>
           </form>
-          <p class="form-hint">验证结果只读，不会修改你的仓库或发布环境。</p>
+          <p class="form-hint">远程分支会先 fetch 到本地引用，再分析远程最新 commit；不会自动改写当前工作区。</p>
         </aside>
 
         <section class="card result-card hidden" id="result-card">

@@ -23,6 +23,9 @@ export interface CreateReviewDto {
   deploy?: boolean;
   frontendUrl?: string;
   frontendCheck?: FrontendCheck;
+  remote?: string;
+  remoteBranch?: string;
+  mergeRemote?: boolean;
 }
 
 export interface ChangedFile {
@@ -53,6 +56,7 @@ export interface ReviewRecord {
   status: ReviewStatus;
   request: CreateReviewDto;
   commitMessage?: string;
+  resolvedCommit?: string;
   changedFiles: ChangedFile[];
   impactAreas: ImpactArea[];
   testPlan: TestPlanItem[];

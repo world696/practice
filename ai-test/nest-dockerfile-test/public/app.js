@@ -10,7 +10,7 @@ function render(review) {
   $('empty-state').classList.add('hidden');
   $('status').textContent = statusText(review.status);
   $('status').className = `status ${review.status === 'passed' ? 'pass' : review.status === 'failed' ? 'fail' : ''}`;
-  $('result-subtitle').textContent = `${review.commitMessage || review.request.commit} · ${review.request.environment}`;
+  $('result-subtitle').textContent = `${review.commitMessage || review.request.commit || review.request.remoteBranch} · ${review.request.environment}${review.resolvedCommit ? ` · ${review.resolvedCommit.slice(0, 12)}` : ''}`;
   const frontend = review.results?.find((item) => item.type === 'frontend');
   $('metrics').innerHTML = [['changedFiles','变更文件',review.changedFiles?.length || 0],['impactAreas','影响区域',review.impactAreas?.length || 0],['selectedTests','选中测试',review.testPlan?.filter((x) => x.selected).length || 0],['results','已完成',review.results?.length || 0]].map(([_,label,value]) => `<div class="metric"><strong>${value}</strong><span>${label}</span></div>`).join('');
   $('page-link').classList.toggle('hidden', !review.request.frontendUrl);
@@ -32,8 +32,10 @@ $('review-form').addEventListener('submit', async (event) => {
   event.preventDefault(); $('form-error').classList.add('hidden');
   const testTypes = [...document.querySelectorAll('.check input:checked')].map((input) => input.value);
   const frontendUrl = $('frontendUrl').value.trim();
-  if (!frontendUrl) testTypes.splice(testTypes.indexOf('frontend'), 1);
+  const frontendIndex = testTypes.indexOf('frontend');
+  if (!frontendUrl && frontendIndex >= 0) testTypes.splice(frontendIndex, 1);
+  if (!$('commit').value.trim() && !$('remoteBranch').value.trim()) { $('form-error').textContent = '请填写 Commit，或填写远程分支'; $('form-error').classList.remove('hidden'); return; }
   const requiredText = $('requiredText').value.split(',').map((x) => x.trim()).filter(Boolean);
-  const payload = { repositoryPath: $('repositoryPath').value.trim(), commit: $('commit').value.trim(), baseCommit: $('baseCommit').value.trim() || undefined, environment: $('environment').value, testTypes, deploy: false, frontendUrl: frontendUrl || undefined, frontendCheck: { expectedTitle: $('expectedTitle').value.trim() || undefined, requiredText: requiredText.length ? requiredText : undefined } };
+  const payload = { repositoryPath: $('repositoryPath').value.trim(), commit: $('commit').value.trim(), baseCommit: $('baseCommit').value.trim() || undefined, environment: $('environment').value, testTypes, deploy: false, frontendUrl: frontendUrl || undefined, frontendCheck: { expectedTitle: $('expectedTitle').value.trim() || undefined, requiredText: requiredText.length ? requiredText : undefined }, remote: $('remote').value.trim() || undefined, remoteBranch: $('remoteBranch').value.trim() || undefined, mergeRemote: $('mergeRemote').checked };
   try { const response = await fetch('/impact-reviews', { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(payload) }); const data = await response.json(); if (!response.ok) throw new Error(data.message || '创建任务失败'); clearTimeout(timer); await poll(data.id); } catch (error) { $('form-error').textContent = error.message; $('form-error').classList.remove('hidden'); }
 });

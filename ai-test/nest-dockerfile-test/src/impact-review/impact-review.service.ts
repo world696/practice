@@ -80,8 +80,8 @@ export class ImpactReviewService {
   }
 
   private validate(input: CreateReviewDto) {
-    if (!input.repositoryPath || !input.commit) {
-      throw new BadRequestException('repositoryPath and commit are required');
+    if (!input.repositoryPath || (!input.commit && !input.remoteBranch)) {
+      throw new BadRequestException('repositoryPath and either commit or remoteBranch are required');
     }
     if (!existsSync(input.repositoryPath)) {
       throw new BadRequestException('repositoryPath does not exist');
@@ -102,11 +102,13 @@ export class ImpactReviewService {
       review.status = 'analyzing';
       review.updatedAt = new Date().toISOString();
       const repo = review.request.repositoryPath;
-      const base = review.request.baseCommit || `${review.request.commit}^`;
+      const commit = await this.resolveCommit(repo, review.request);
+      review.resolvedCommit = commit;
+      const base = review.request.baseCommit || `${commit}^`;
       const [files, commitMessage, diff] = await Promise.all([
-        this.git(repo, ['diff', '--name-status', base, review.request.commit]),
-        this.git(repo, ['show', '-s', '--format=%s', review.request.commit]),
-        this.git(repo, ['diff', '--unified=0', base, review.request.commit]),
+        this.git(repo, ['diff', '--name-status', base, commit]),
+        this.git(repo, ['show', '-s', '--format=%s', commit]),
+        this.git(repo, ['diff', '--unified=0', base, commit]),
       ]);
       review.commitMessage = commitMessage.trim();
       review.changedFiles = this.parseChangedFiles(files, diff);
@@ -130,6 +132,32 @@ export class ImpactReviewService {
       review.error = error instanceof Error ? error.message : String(error);
     } finally {
       review.updatedAt = new Date().toISOString();
+    }
+  }
+
+  private async resolveCommit(repo: string, request: CreateReviewDto) {
+    if (request.remoteBranch) {
+      const remote = request.remote || 'origin';
+      await this.git(repo, ['fetch', '--no-tags', remote, request.remoteBranch]);
+      const fetched = (await this.git(repo, ['rev-parse', 'FETCH_HEAD'])).trim();
+      if (!fetched) throw new BadRequestException(`Remote branch ${remote}/${request.remoteBranch} returned no commit`);
+      if (request.mergeRemote) await this.mergeFetchedCommit(repo, fetched);
+      return fetched;
+    }
+    try {
+      return (await this.git(repo, ['rev-parse', '--verify', `${request.commit}^{commit}`])).trim();
+    } catch {
+      throw new BadRequestException(`Commit ${request.commit} is not available locally; fill in a remote branch to fetch it first`);
+    }
+  }
+
+  private async mergeFetchedCommit(repo: string, commit: string) {
+    const status = (await this.git(repo, ['status', '--porcelain'])).trim();
+    if (status) throw new BadRequestException('Cannot merge remote branch: local working tree is not clean');
+    try {
+      await this.git(repo, ['merge', '--ff-only', commit]);
+    } catch {
+      throw new BadRequestException('Remote branch was fetched, but it cannot be fast-forwarded into the current branch');
     }
   }
 
