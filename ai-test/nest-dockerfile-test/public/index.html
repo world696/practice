@@ -39,8 +39,10 @@
         <section class="card result-card hidden" id="result-card">
           <div class="result-head"><div><span class="kicker">02 / DECISION</span><h2>验证结论</h2><small id="result-subtitle">任务处理中</small></div><span id="status" class="status">处理中</span></div>
           <div class="metrics" id="metrics"></div>
+          <div class="change-summary" id="change-summary"></div>
           <div class="feature-result"><div class="subhead"><h3>页面健康</h3><a id="page-link" class="open-page hidden" target="_blank" rel="noreferrer">打开页面 ↗</a></div><div id="frontend-result" class="page-result muted-panel">等待结果…</div></div>
-          <div class="two-panels"><div><div class="subhead"><h3>风险与影响</h3><span class="muted">按优先级</span></div><div id="impact-list" class="panel">等待分析…</div></div><div><div class="subhead"><h3>测试计划</h3><span class="muted">自动选择</span></div><div id="plan-list" class="panel">等待生成…</div></div></div>
+          <div class="impact-focus"><div class="subhead"><div><h3>改动影响点</h3><small>系统根据 diff 推导出的需要重点回归的区域</small></div><span id="impact-count" class="count-badge"></span></div><div id="impact-list" class="impact-list">等待分析…</div></div>
+          <div class="two-panels"><div><div class="subhead"><h3>测试计划</h3><span class="muted">自动选择</span></div><div id="plan-list" class="panel">等待生成…</div></div><div><div class="subhead"><h3>变更文件</h3><span class="muted">展开查看</span></div><div id="file-list" class="panel">等待分析…</div></div></div>
           <details class="raw-details"><summary>查看变更文件和原始结果</summary><div class="two-panels raw-panels"><div id="file-list" class="panel">等待分析…</div><pre id="raw-result"></pre></div></details>
         </section>
         <section class="card empty-state" id="empty-state"><div class="empty-icon">⌁</div><h2>结果会出现在这里</h2><p>填入 commit 和页面地址，点击“开始验证”。<br />系统会把复杂的分析压缩成一个可执行结论。</p></section>
