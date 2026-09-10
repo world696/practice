@@ -28,7 +28,9 @@ curl -X POST http://localhost:3000/impact-reviews \
 
 填写远程分支后，服务会执行 `git fetch --no-tags <remote> <branch>`，以 `FETCH_HEAD` 对应的远程 commit 做分析。勾选“同步到当前分支”后，会在工作区干净且可以 fast-forward 时合并到当前分支；否则只拉取并分析，不覆盖开发者未提交的修改。
 
-前端浏览器检查使用 Playwright：会执行页面 JavaScript，监听 console/page error、失败请求和 HTTP 4xx/5xx，按配置点击 CSS selector，并生成截图。登录页面可选择 Bearer Token 或 Cookie；凭证只在本次任务的浏览器上下文中使用，不放入任务结果、不写入日志，任务结束后销毁。Bearer Token 只注入到目标页面同源请求，不发送给第三方资源。
+前端浏览器检查使用 Playwright：会执行页面 JavaScript，监听 console/page error、失败请求和 HTTP 4xx/5xx，按配置点击 CSS selector，并生成截图。多应用场景在 `frontendTargets` 中逐行提供应用名和 URL；Token 本身不能推断页面，系统会将凭证仅注入每个目标页面的同源请求，不发送给第三方资源。凭证只在本次任务的浏览器上下文中使用，不放入任务结果、不写入日志，任务结束后销毁。
+
+运行环境必须有可用浏览器：优先使用 `PLAYWRIGHT_BROWSER_PATH`，否则自动探测系统 Chrome/Chromium；若使用 Playwright 自带浏览器，请先执行 `pnpm exec playwright install chromium`。每个页面目标都会产生独立的页面结果，最后汇总为整体测试步骤和结论。
 
 控制台默认只做安全点击探测；若要验证明确交互，在“页面断言”中填写 CSS selector，例如 `button.submit, a.next`。影响点卡片会展开列出所有关联的页面文件和路径，并显示影响对象、命中原因和建议回归项。
 

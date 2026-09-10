@@ -15,6 +15,7 @@ import {
   ReviewRecord,
   TestPlanItem,
   TestType,
+  FrontendTarget,
 } from './impact-review.types';
 
 const execFileAsync = promisify(execFile);
@@ -61,6 +62,7 @@ export class ImpactReviewService {
         environment: input.environment || 'staging',
       },
       results: [],
+      summary: { total: 0, passed: 0, failed: 0, skipped: 0, conclusion: '等待测试完成', steps: [] },
     };
     this.reviews.set(id, record);
     this.browserAuth.set(id, browserAuth);
@@ -104,11 +106,14 @@ export class ImpactReviewService {
     if (!existsSync(input.repositoryPath)) {
       throw new BadRequestException('repositoryPath does not exist');
     }
-    if ((input.testTypes || []).includes('frontend') && !input.frontendUrl) {
-      throw new BadRequestException('frontendUrl is required when frontend test is selected');
+    if ((input.testTypes || []).includes('frontend') && !input.frontendUrl && !input.frontendTargets?.length) {
+      throw new BadRequestException('frontendUrl or frontendTargets is required when frontend test is selected');
     }
     if (input.frontendUrl && !/^https?:\/\//.test(input.frontendUrl)) {
       throw new BadRequestException('frontendUrl must start with http:// or https://');
+    }
+    for (const target of input.frontendTargets || []) {
+      if (!target.name || !/^https?:\/\//.test(target.url)) throw new BadRequestException('Each frontend target needs a name and an http(s) URL');
     }
     if (input.browserAuth?.mode === 'bearer' && !input.browserAuth.token) {
       throw new BadRequestException('Bearer Token is required for bearer authentication');
@@ -156,10 +161,12 @@ export class ImpactReviewService {
       this.addEvent(review, { type: 'step', message: review.testPlan.some((item) => item.type === 'frontend' && item.selected) ? '开始启动真实浏览器验证' : '开始执行测试计划' });
       await this.executeTests(review);
       review.status = review.results.some((result) => result.status === 'failed') ? 'failed' : 'passed';
+      this.refreshSummary(review);
       this.addEvent(review, { type: 'step', message: review.status === 'passed' ? '全部选定检查完成' : '检查完成，但存在失败项', level: review.status === 'passed' ? 'info' : 'warning' });
     } catch (error) {
       review.status = 'failed';
       review.error = error instanceof Error ? error.message : String(error);
+      this.refreshSummary(review);
     } finally {
       this.browserAuth.delete(review.id);
       review.updatedAt = new Date().toISOString();
@@ -230,11 +237,15 @@ export class ImpactReviewService {
   }
 
   private async executeFrontendCheck(review: ReviewRecord, started: number) {
-    if (!review.request.frontendUrl) {
+    const targets = this.frontendTargets(review.request);
+    if (!targets.length) {
       review.results.push({ type: 'frontend', status: 'skipped', durationMs: 0, output: 'No frontendUrl provided' });
       return;
     }
-    const systemChrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+    for (const target of targets) await this.executeFrontendTarget(review, target, started);
+  }
+
+  private async executeFrontendTarget(review: ReviewRecord, target: FrontendTarget, started: number) {
     let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
     const auth = this.browserAuth.get(review.id);
     const consoleErrors: string[] = [];
@@ -245,19 +256,20 @@ export class ImpactReviewService {
     let title = '';
     const interactionErrors: string[] = [];
     try {
-      browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_BROWSER_PATH || (existsSync(systemChrome) ? systemChrome : undefined) });
-      const target = new URL(review.request.frontendUrl);
+      const executablePath = this.browserExecutablePath();
+      browser = await chromium.launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
+      const targetUrl = new URL(target.url);
       const context = await browser.newContext({ ignoreHTTPSErrors: true });
       if (auth?.mode === 'bearer' && auth.token) {
         await context.route('**/*', async (route) => {
           const requestUrl = new URL(route.request().url());
           const headers = { ...route.request().headers() };
-          if (requestUrl.origin === target.origin) headers.authorization = `Bearer ${auth.token}`;
+          if (requestUrl.origin === targetUrl.origin) headers.authorization = `Bearer ${auth.token}`;
           await route.continue({ headers });
         });
       }
       if (auth?.mode === 'cookie' && auth.cookieName && auth.cookieValue) {
-        await context.addCookies([{ name: auth.cookieName, value: auth.cookieValue, domain: target.hostname, path: '/' }]);
+        await context.addCookies([{ name: auth.cookieName, value: auth.cookieValue, domain: targetUrl.hostname, path: '/' }]);
       }
       const page = await context.newPage();
       page.on('console', (message) => {
@@ -282,8 +294,8 @@ export class ImpactReviewService {
           this.addEvent(review, { type: 'response', level: 'error', message: `HTTP ${response.status()} ${response.url()}`, url: response.url() });
         }
       });
-      this.addEvent(review, { type: 'step', message: `打开页面 ${review.request.frontendUrl}` });
-      const response = await page.goto(review.request.frontendUrl, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+      this.addEvent(review, { type: 'step', message: `打开应用「${target.name}」 ${target.url}` });
+      const response = await page.goto(target.url, { waitUntil: 'domcontentloaded', timeout: 30_000 });
       status = response?.status() || 0;
       title = await page.title();
       this.addEvent(review, { type: 'step', message: `页面加载完成 · HTTP ${status} · 标题「${title || '(empty)'}」` });
@@ -334,15 +346,60 @@ export class ImpactReviewService {
         durationMs: Date.now() - started,
         output: `HTTP ${status}; title: ${title || '(empty)'}; console errors: ${consoleErrors.length}; failed requests: ${failedRequests.length}`,
         error: passed ? undefined : `页面检查失败：${missingText.length ? `缺少文案 ${missingText.join(', ')}；` : ''}${titleOk ? '' : `标题不匹配，实际为「${title}」；`}${consoleErrors.length ? `控制台错误 ${consoleErrors.length} 个；` : ''}${pageErrors.length ? `页面异常 ${pageErrors.length} 个；` : ''}${failedRequests.length ? `失败请求 ${failedRequests.length} 个；` : ''}${interactionErrors.length ? `交互失败 ${interactionErrors.length} 个；` : ''}`,
-        details: { url: review.request.frontendUrl, status, title, missingText, consoleErrors: consoleErrors.length, consoleWarnings: consoleWarnings.length, pageErrors: pageErrors.length, failedRequests: failedRequests.length, interactionErrors: interactionErrors.length, screenshotReady: true },
+        details: { name: target.name, url: target.url, status, title, missingText, consoleErrors: consoleErrors.length, consoleWarnings: consoleWarnings.length, pageErrors: pageErrors.length, failedRequests: failedRequests.length, interactionErrors: interactionErrors.length, screenshotReady: true },
       });
     } catch (error) {
-      this.addEvent(review, { type: 'error', level: 'error', message: error instanceof Error ? error.message : String(error) });
-      const message = this.redact(review, error instanceof Error ? error.message : String(error));
-      review.results.push({ type: 'frontend', status: 'failed', durationMs: Date.now() - started, error: message, details: { url: review.request.frontendUrl, status, title, screenshotReady: false } });
+      const rawMessage = error instanceof Error ? error.message : String(error);
+      const message = /Executable doesn't exist|executable doesn't exist|browserType\.launch/i.test(rawMessage)
+        ? `${rawMessage}。未找到可用浏览器，请在部署环境执行「pnpm exec playwright install chromium」，或配置 PLAYWRIGHT_BROWSER_PATH。`
+        : rawMessage;
+      this.addEvent(review, { type: 'error', level: 'error', message: `应用「${target.name}」验证失败 · ${message}` });
+      review.results.push({ type: 'frontend', status: 'failed', durationMs: Date.now() - started, error: this.redact(review, message), details: { name: target.name, url: target.url, status, title, screenshotReady: false } });
     } finally {
       await browser?.close();
     }
+  }
+
+  private frontendTargets(request: ReviewRecord['request']): FrontendTarget[] {
+    return request.frontendTargets?.length ? request.frontendTargets : request.frontendUrl ? [{ name: '默认应用', url: request.frontendUrl }] : [];
+  }
+
+  private browserExecutablePath() {
+    const candidates = [
+      process.env.PLAYWRIGHT_BROWSER_PATH,
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      '/usr/bin/google-chrome',
+      '/usr/bin/chromium',
+      `${process.env.ProgramFiles || 'C:\\Program Files'}\\Google\\Chrome\\Application\\chrome.exe`,
+      `${process.env.LOCALAPPDATA || ''}\\Google\\Chrome\\Application\\chrome.exe`,
+    ].filter(Boolean) as string[];
+    return candidates.find((candidate) => existsSync(candidate));
+  }
+
+  private refreshSummary(review: ReviewRecord) {
+    const passed = review.results.filter((result) => result.status === 'passed').length;
+    const failed = review.results.filter((result) => result.status === 'failed').length;
+    const skipped = review.results.filter((result) => result.status === 'skipped').length;
+    const resultByType = new Map<TestType, ReviewRecord['results'][number]>();
+    for (const result of review.results) if (!resultByType.has(result.type)) resultByType.set(result.type, result);
+    const steps = review.testPlan.map((item) => {
+      const result = resultByType.get(item.type);
+      return {
+        name: item.type,
+        status: result?.status || 'skipped',
+        detail: result?.error || result?.output || (item.selected ? '执行中或等待结果' : item.reason),
+      } as const;
+    });
+    review.summary = {
+      total: review.results.length,
+      passed,
+      failed,
+      skipped,
+      conclusion: failed
+        ? `共完成 ${review.results.length} 项检查，其中 ${failed} 项失败，需要处理后再发布评估`
+        : `共完成 ${review.results.length} 项检查，未发现阻断问题，可以进入下一步发布评估`,
+      steps,
+    };
   }
 
   private addEvent(review: ReviewRecord, event: Omit<BrowserEvent, 'at'>) {
@@ -416,9 +473,9 @@ export class ImpactReviewService {
     const selected = new Set(requested?.length ? requested : (['frontend', 'unit', 'integration', 'e2e', 'security', 'build'] as TestType[]));
     return (Object.keys(TEST_COMMANDS) as TestType[]).map((type) => ({
       type,
-      reason: type === 'frontend' ? (review.request.frontendUrl ? '验证目标页面可达、标题和关键文案' : '未提供前端地址，跳过页面检查') : type === 'security' && critical ? '存在高风险影响点，必须执行安全回归' : `基于 ${review.impactAreas.length} 个影响区域自动选择`,
+      reason: type === 'frontend' ? (this.frontendTargets(review.request).length ? `验证 ${this.frontendTargets(review.request).length} 个应用页面可达、标题和关键文案` : '未提供前端地址，跳过页面检查') : type === 'security' && critical ? '存在高风险影响点，必须执行安全回归' : `基于 ${review.impactAreas.length} 个影响区域自动选择`,
       command: TEST_COMMANDS[type],
-      selected: (type === 'frontend' ? Boolean(review.request.frontendUrl) : selected.has(type)) || (type === 'security' && critical),
+      selected: (type === 'frontend' ? this.frontendTargets(review.request).length > 0 : selected.has(type)) || (type === 'security' && critical),
     }));
   }
 

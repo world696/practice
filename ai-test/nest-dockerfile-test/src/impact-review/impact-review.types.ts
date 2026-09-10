@@ -16,6 +16,11 @@ export interface FrontendCheck {
   autoClick?: boolean;
 }
 
+export interface FrontendTarget {
+  name: string;
+  url: string;
+}
+
 export interface BrowserAuthInput {
   mode: 'bearer' | 'cookie';
   token?: string;
@@ -36,6 +41,7 @@ export interface CreateReviewDto {
   testTypes?: TestType[];
   deploy?: boolean;
   frontendUrl?: string;
+  frontendTargets?: FrontendTarget[];
   frontendCheck?: FrontendCheck;
   browserAuth?: BrowserAuthInput;
   remote?: string;
@@ -92,6 +98,14 @@ export interface ReviewRecord {
     error?: string;
     details?: Record<string, unknown>;
   }>;
+  summary?: {
+    total: number;
+    passed: number;
+    failed: number;
+    skipped: number;
+    conclusion: string;
+    steps: Array<{ name: string; status: 'passed' | 'failed' | 'skipped'; detail: string }>;
+  };
   error?: string;
 }
 

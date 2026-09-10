@@ -14,13 +14,16 @@ function render(review) {
   $('result-subtitle').textContent = `${review.commitMessage || review.request.commit || review.request.remoteBranch} · ${review.request.environment}${review.resolvedCommit ? ` · ${review.resolvedCommit.slice(0, 12)}` : ''}`;
   const frontend = review.results?.find((item) => item.type === 'frontend');
   $('metrics').innerHTML = [['changedFiles','变更文件',review.changedFiles?.length || 0],['impactAreas','影响区域',review.impactAreas?.length || 0],['selectedTests','选中测试',review.testPlan?.filter((x) => x.selected).length || 0],['results','已完成',review.results?.length || 0]].map(([_,label,value]) => `<div class="metric"><strong>${value}</strong><span>${label}</span></div>`).join('');
+  const summary = review.summary;
+  $('overall-summary').innerHTML = summary ? `<div class="summary-head"><div><strong>整体测试结论</strong><span>${esc(summary.conclusion)}</span></div><div class="summary-counts"><b>${summary.passed} 通过</b><b>${summary.failed} 失败</b><b>${summary.skipped} 跳过</b></div></div><div class="summary-steps">${summary.steps.map((step) => `<div class="summary-step"><span class="step-dot ${esc(step.status)}"></span><strong>${esc(step.name)}</strong><span>${esc(step.detail)}</span>${pill(step.status)}</div>`).join('')}</div>` : '<div class="summary-pending">整体测试步骤将在分析完成后显示…</div>';
   const additions = (review.changedFiles || []).reduce((sum, file) => sum + file.additions, 0);
   const deletions = (review.changedFiles || []).reduce((sum, file) => sum + file.deletions, 0);
   const highestRisk = ['critical', 'high', 'medium', 'low'].find((risk) => review.impactAreas?.some((area) => area.risk === risk));
   $('change-summary').innerHTML = `<span><b>+${additions}</b> 新增行</span><span><b>-${deletions}</b> 删除行</span><span><b>${highestRisk ? ({ critical:'严重', high:'高', medium:'中', low:'低' }[highestRisk]) : '无'}</b> 最高风险</span><span class="summary-note">影响点不是测试失败，而是这次改动需要重点验证的区域</span>`;
-  $('page-link').classList.toggle('hidden', !review.request.frontendUrl);
-  if (review.request.frontendUrl) $('page-link').href = review.request.frontendUrl;
-  $('frontend-result').innerHTML = frontend ? `<div class="item"><span>${esc(frontend.details?.url || review.request.frontendUrl || '页面')}</span>${pill(frontend.status)}</div><div>${esc(frontend.output || frontend.error || '')}</div>${frontend.error ? `<div class="error">${esc(frontend.error)}</div>` : ''}` : (review.status === 'failed' ? `<div class="error">页面检查未完成：${esc(review.error || '浏览器启动或页面执行失败')}</div>` : (review.request.frontendUrl ? '页面检查执行中…' : '未配置前端页面地址'));
+  const frontendTargets = review.request.frontendTargets || (review.request.frontendUrl ? [{ name: '默认应用', url: review.request.frontendUrl }] : []);
+  $('page-link').classList.toggle('hidden', frontendTargets.length !== 1);
+  if (frontendTargets.length === 1) $('page-link').href = frontendTargets[0].url;
+  $('frontend-result').innerHTML = frontend ? (review.results.filter((item) => item.type === 'frontend').map((item) => `<div class="item"><span>${esc(item.details?.name || '应用')} · ${esc(item.details?.url || '')}</span>${pill(item.status)}</div><div>${esc(item.output || item.error || '')}</div>${item.error ? `<div class="error">${esc(item.error)}</div>` : ''}`).join('') || '页面检查执行中…') : (review.status === 'failed' ? `<div class="error">页面检查未完成：${esc(review.error || '浏览器启动或页面执行失败')}</div>` : (frontendTargets.length ? '页面检查执行中…' : '未配置应用 / 页面目标'));
   $('event-list').innerHTML = review.events?.length ? review.events.slice(-80).map((event) => `<div class="event event-${esc(event.level || 'info')}"><time>${new Date(event.at).toLocaleTimeString()}</time><span class="event-type">${esc(event.type)}</span><span>${esc(event.message)}</span></div>`).join('') : '等待浏览器启动…';
   if (review.screenshotReady) { $('screenshot').src = `/impact-reviews/${review.id}/screenshot?v=${encodeURIComponent(review.updatedAt)}`; $('screenshot').classList.remove('hidden'); }
   $('impact-count').textContent = `${review.impactAreas?.length || 0} 个区域`;
@@ -39,15 +42,15 @@ async function poll(id) {
 $('review-form').addEventListener('submit', async (event) => {
   event.preventDefault(); $('form-error').classList.add('hidden');
   const testTypes = [...document.querySelectorAll('.check input:checked')].map((input) => input.value);
-  const frontendUrl = $('frontendUrl').value.trim();
+  const frontendTargets = $('frontendTargets').value.split('\n').map((line) => line.trim()).filter(Boolean).map((line) => { const [name, ...urlParts] = line.split('|'); return { name: name.trim(), url: urlParts.join('|').trim() }; }).filter((target) => target.name && target.url);
   const frontendIndex = testTypes.indexOf('frontend');
-  if (!frontendUrl && frontendIndex >= 0) testTypes.splice(frontendIndex, 1);
+  if (!frontendTargets.length && frontendIndex >= 0) testTypes.splice(frontendIndex, 1);
   if (!$('commit').value.trim() && !$('remoteBranch').value.trim()) { $('form-error').textContent = '请填写 Commit，或填写远程分支'; $('form-error').classList.remove('hidden'); return; }
   const requiredText = $('requiredText').value.split(',').map((x) => x.trim()).filter(Boolean);
   const clickSelectors = $('clickSelectors').value.split(',').map((x) => x.trim()).filter(Boolean);
   const authMode = $('authMode').value;
   const authToken = $('authToken').value;
   const browserAuth = authMode === 'none' || !authToken ? undefined : { mode: authMode, token: authToken, cookieName: $('authCookieName').value.trim() || 'session', cookieValue: authMode === 'cookie' ? authToken : undefined };
-  const payload = { repositoryPath: $('repositoryPath').value.trim(), commit: $('commit').value.trim(), baseCommit: $('baseCommit').value.trim() || undefined, environment: $('environment').value, testTypes, deploy: false, frontendUrl: frontendUrl || undefined, frontendCheck: { expectedTitle: $('expectedTitle').value.trim() || undefined, requiredText: requiredText.length ? requiredText : undefined, clickSelectors: clickSelectors.length ? clickSelectors : undefined, autoClick: $('autoClick').checked }, browserAuth, remote: $('remote').value.trim() || undefined, remoteBranch: $('remoteBranch').value.trim() || undefined, mergeRemote: $('mergeRemote').checked };
+  const payload = { repositoryPath: $('repositoryPath').value.trim(), commit: $('commit').value.trim(), baseCommit: $('baseCommit').value.trim() || undefined, environment: $('environment').value, testTypes, deploy: false, frontendTargets: frontendTargets.length ? frontendTargets : undefined, frontendCheck: { expectedTitle: $('expectedTitle').value.trim() || undefined, requiredText: requiredText.length ? requiredText : undefined, clickSelectors: clickSelectors.length ? clickSelectors : undefined, autoClick: $('autoClick').checked }, browserAuth, remote: $('remote').value.trim() || undefined, remoteBranch: $('remoteBranch').value.trim() || undefined, mergeRemote: $('mergeRemote').checked };
   try { const response = await fetch('/impact-reviews', { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify(payload) }); const data = await response.json(); if (!response.ok) throw new Error(data.message || '创建任务失败'); clearTimeout(timer); await poll(data.id); } catch (error) { $('form-error').textContent = error.message; $('form-error').classList.remove('hidden'); }
 });
