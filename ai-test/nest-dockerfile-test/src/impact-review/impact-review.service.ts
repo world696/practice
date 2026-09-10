@@ -235,7 +235,7 @@ export class ImpactReviewService {
       return;
     }
     const systemChrome = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-    const browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_BROWSER_PATH || (existsSync(systemChrome) ? systemChrome : undefined) });
+    let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
     const auth = this.browserAuth.get(review.id);
     const consoleErrors: string[] = [];
     const consoleWarnings: string[] = [];
@@ -243,7 +243,9 @@ export class ImpactReviewService {
     const failedRequests: string[] = [];
     let status = 0;
     let title = '';
+    const interactionErrors: string[] = [];
     try {
+      browser = await chromium.launch({ headless: true, executablePath: process.env.PLAYWRIGHT_BROWSER_PATH || (existsSync(systemChrome) ? systemChrome : undefined) });
       const target = new URL(review.request.frontendUrl);
       const context = await browser.newContext({ ignoreHTTPSErrors: true });
       if (auth?.mode === 'bearer' && auth.token) {
@@ -291,9 +293,32 @@ export class ImpactReviewService {
       const missingText = (check.requiredText || []).filter((text) => !bodyText.includes(text));
       const expectedStatus = check.expectedStatus ?? 200;
       const titleOk = !check.expectedTitle || title === check.expectedTitle;
-      for (const selector of check.clickSelectors || []) {
+      const explicitSelectors = check.clickSelectors || [];
+      for (const selector of explicitSelectors) {
         this.addEvent(review, { type: 'step', message: `点击元素 ${selector}` });
-        await page.locator(selector).first().click({ timeout: 10_000 });
+        try {
+          await page.locator(selector).first().click({ timeout: 10_000 });
+        } catch (error) {
+          interactionErrors.push(selector);
+          this.addEvent(review, { type: 'error', level: 'error', message: `点击失败 ${selector} · ${error instanceof Error ? error.message : String(error)}` });
+        }
+      }
+      if (!explicitSelectors.length && check.autoClick !== false) {
+        const candidates = await page.locator('button[type="button"], [role="button"]').all();
+        const safeCandidates = candidates.slice(0, 3);
+        if (!safeCandidates.length) {
+          this.addEvent(review, { type: 'step', message: '未发现安全点击目标，跳过交互', level: 'warning' });
+        }
+        for (const candidate of safeCandidates) {
+          const label = (await candidate.innerText().catch(() => '')).trim().slice(0, 60) || '未命名按钮';
+          this.addEvent(review, { type: 'step', message: `模拟安全点击「${label}」` });
+          try {
+            await candidate.click({ timeout: 10_000 });
+          } catch (error) {
+            interactionErrors.push(label);
+            this.addEvent(review, { type: 'error', level: 'error', message: `模拟点击失败「${label}」 · ${error instanceof Error ? error.message : String(error)}` });
+          }
+        }
       }
       const screenshotDir = join(tmpdir(), 'impact-review-screenshots');
       mkdirSync(screenshotDir, { recursive: true });
@@ -302,20 +327,21 @@ export class ImpactReviewService {
       this.screenshots.set(review.id, screenshotPath);
       review.screenshotReady = true;
       this.addEvent(review, { type: 'screenshot', message: '已生成页面截图' });
-      const passed = status === expectedStatus && missingText.length === 0 && titleOk && consoleErrors.length === 0 && pageErrors.length === 0 && failedRequests.length === 0;
+      const passed = status === expectedStatus && missingText.length === 0 && titleOk && consoleErrors.length === 0 && pageErrors.length === 0 && failedRequests.length === 0 && interactionErrors.length === 0;
       review.results.push({
         type: 'frontend',
         status: passed ? 'passed' : 'failed',
         durationMs: Date.now() - started,
         output: `HTTP ${status}; title: ${title || '(empty)'}; console errors: ${consoleErrors.length}; failed requests: ${failedRequests.length}`,
-        error: passed ? undefined : `页面检查失败：${missingText.length ? `缺少文案 ${missingText.join(', ')}；` : ''}${titleOk ? '' : `标题不匹配，实际为「${title}」；`}${consoleErrors.length ? `控制台错误 ${consoleErrors.length} 个；` : ''}${pageErrors.length ? `页面异常 ${pageErrors.length} 个；` : ''}${failedRequests.length ? `失败请求 ${failedRequests.length} 个；` : ''}`,
-        details: { url: review.request.frontendUrl, status, title, missingText, consoleErrors: consoleErrors.length, consoleWarnings: consoleWarnings.length, pageErrors: pageErrors.length, failedRequests: failedRequests.length, screenshotReady: true },
+        error: passed ? undefined : `页面检查失败：${missingText.length ? `缺少文案 ${missingText.join(', ')}；` : ''}${titleOk ? '' : `标题不匹配，实际为「${title}」；`}${consoleErrors.length ? `控制台错误 ${consoleErrors.length} 个；` : ''}${pageErrors.length ? `页面异常 ${pageErrors.length} 个；` : ''}${failedRequests.length ? `失败请求 ${failedRequests.length} 个；` : ''}${interactionErrors.length ? `交互失败 ${interactionErrors.length} 个；` : ''}`,
+        details: { url: review.request.frontendUrl, status, title, missingText, consoleErrors: consoleErrors.length, consoleWarnings: consoleWarnings.length, pageErrors: pageErrors.length, failedRequests: failedRequests.length, interactionErrors: interactionErrors.length, screenshotReady: true },
       });
     } catch (error) {
       this.addEvent(review, { type: 'error', level: 'error', message: error instanceof Error ? error.message : String(error) });
-      review.results.push({ type: 'frontend', status: 'failed', durationMs: Date.now() - started, error: this.redact(review, error instanceof Error ? error.message : String(error)) });
+      const message = this.redact(review, error instanceof Error ? error.message : String(error));
+      review.results.push({ type: 'frontend', status: 'failed', durationMs: Date.now() - started, error: message, details: { url: review.request.frontendUrl, status, title, screenshotReady: false } });
     } finally {
-      await browser.close();
+      await browser?.close();
     }
   }
 

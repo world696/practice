@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>页面发布验证台</title>
+    <link rel="icon" href="/console/favicon.svg" />
     <link rel="stylesheet" href="/console/styles.css" />
   </head>
   <body>
@@ -28,7 +29,7 @@
             <div class="field-row"><label class="field">远程仓库 <span class="muted">可选</span><input id="remote" value="origin" placeholder="origin" /></label><label class="field">远程分支 <span class="muted">填写后自动拉取</span><input id="remoteBranch" placeholder="feature/login" /></label></div>
             <label class="merge-option"><input id="mergeRemote" type="checkbox" /> 拉取后同步到当前分支 <span>仅允许工作区干净且可 fast-forward</span></label>
             <div class="field-row"><label class="field">环境<select id="environment"><option>staging</option><option>test</option><option>production</option></select></label><label class="field">基准 commit<input id="baseCommit" placeholder="默认父提交" /></label></div>
-            <details class="advanced"><summary>页面断言 <span>标题 / 文案 / 点击</span></summary><div class="advanced-body"><label class="field">期望标题<input id="expectedTitle" placeholder="例如 首页" /></label><label class="field">必须出现的文案<input id="requiredText" placeholder="多个文案用逗号分隔" /></label><label class="field">点击元素 <span class="muted">可选，多个 selector 用逗号分隔</span><input id="clickSelectors" placeholder="例如 button.submit, a.next" /></label></div></details>
+            <details class="advanced"><summary>页面断言 <span>标题 / 文案 / 点击</span></summary><div class="advanced-body"><label class="field">期望标题<input id="expectedTitle" placeholder="例如 首页" /></label><label class="field">必须出现的文案<input id="requiredText" placeholder="多个文案用逗号分隔" /></label><label class="field">点击元素 <span class="muted">建议填写，多个 selector 用逗号分隔</span><input id="clickSelectors" placeholder="例如 button.submit, a.next" /></label><label class="safe-click"><input id="autoClick" type="checkbox" checked /> 自动安全点击 <span>仅点击 button[type=button] / role=button，不提交表单</span></label></div></details>
             <details class="advanced"><summary>登录凭证 <span>Token 不会保存</span></summary><div class="advanced-body"><label class="field">认证方式<select id="authMode"><option value="none">无需认证</option><option value="bearer">Bearer Token</option><option value="cookie">Cookie</option></select></label><label class="field">Token / Cookie 值<input id="authToken" type="password" autocomplete="off" placeholder="仅本次浏览器任务使用" /></label><label class="field">Cookie 名称 <span class="muted">Cookie 模式填写</span><input id="authCookieName" value="session" placeholder="session" /></label></div></details>
             <div class="run-options"><span class="field-label">执行测试</span><div class="checks"><label class="check active"><input type="checkbox" value="frontend" checked /> 页面</label><label class="check active"><input type="checkbox" value="unit" checked /> 单元</label><label class="check"><input type="checkbox" value="e2e" /> E2E</label><label class="check active"><input type="checkbox" value="security" checked /> 安全</label><label class="check"><input type="checkbox" value="build" /> 构建</label></div></div>
             <button class="primary" type="submit"><span>开始验证</span><b>↗</b></button>

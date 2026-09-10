@@ -30,6 +30,8 @@ curl -X POST http://localhost:3000/impact-reviews \
 
 前端浏览器检查使用 Playwright：会执行页面 JavaScript，监听 console/page error、失败请求和 HTTP 4xx/5xx，按配置点击 CSS selector，并生成截图。登录页面可选择 Bearer Token 或 Cookie；凭证只在本次任务的浏览器上下文中使用，不放入任务结果、不写入日志，任务结束后销毁。Bearer Token 只注入到目标页面同源请求，不发送给第三方资源。
 
+控制台默认只做安全点击探测；若要验证明确交互，在“页面断言”中填写 CSS selector，例如 `button.submit, a.next`。影响点卡片会展开列出所有关联的页面文件和路径，并显示影响对象、命中原因和建议回归项。
+
 任务会异步完成。通过 `GET /impact-reviews/:id` 查看 commit 信息、变更文件、影响区域、风险等级、测试计划、测试结果和部署状态；失败任务可调用 `POST /impact-reviews/:id/retry`。
 
 ## 当前边界与遗漏项

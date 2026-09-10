@@ -13,6 +13,7 @@ export interface FrontendCheck {
   expectedTitle?: string;
   expectedStatus?: number;
   clickSelectors?: string[];
+  autoClick?: boolean;
 }
 
 export interface BrowserAuthInput {
