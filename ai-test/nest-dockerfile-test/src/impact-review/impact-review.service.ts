@@ -138,7 +138,10 @@ export class ImpactReviewService {
       review.commitMessage = commitMessage.trim();
       review.changedFiles = this.parseChangedFiles(files, diff);
       review.impactAreas = this.analyzeImpact(review.changedFiles, diff);
+      this.addEvent(review, { type: 'step', message: `Diff 解析完成 · ${review.changedFiles.length} 个文件 · ${review.impactAreas.length} 个影响区域` });
+      for (const area of review.impactAreas) this.addEvent(review, { type: 'step', message: `影响点：${area.name} · ${area.affected}` });
       review.testPlan = this.buildTestPlan(review);
+      this.addEvent(review, { type: 'step', message: `自动选择 ${review.testPlan.filter((item) => item.selected).length} 项测试` });
       review.status = 'waiting_for_deployment';
       review.updatedAt = new Date().toISOString();
 
@@ -201,6 +204,7 @@ export class ImpactReviewService {
     }
     for (const item of review.testPlan.filter((candidate) => candidate.selected)) {
       const started = Date.now();
+      this.addEvent(review, { type: 'step', message: `开始执行 ${item.type}` });
       if (item.type === 'frontend') {
         await this.executeFrontendCheck(review, started);
         continue;
@@ -209,6 +213,7 @@ export class ImpactReviewService {
       const hasScript = item.type === 'unit' ? Boolean(scripts.test) : Boolean(scripts[scriptName]);
       if (!hasScript) {
         review.results.push({ type: item.type, status: 'skipped', durationMs: Date.now() - started, output: `No ${item.type === 'unit' ? 'test' : scriptName} script found` });
+        this.addEvent(review, { type: 'step', message: `${item.type} 跳过：未找到对应脚本`, level: 'warning' });
         continue;
       }
       try {
@@ -216,8 +221,10 @@ export class ImpactReviewService {
         const args = item.type === 'unit' ? ['run', command, '--', '--runInBand'] : ['run', command, '--', '--runInBand'];
         const result = await execFileAsync('npm', args, { cwd: review.request.repositoryPath, timeout: 120_000, maxBuffer: 2_000_000 });
         review.results.push({ type: item.type, status: 'passed', durationMs: Date.now() - started, output: `${result.stdout}${result.stderr}`.slice(-4000) });
+        this.addEvent(review, { type: 'step', message: `${item.type} 通过 · ${Date.now() - started}ms` });
       } catch (error: any) {
         review.results.push({ type: item.type, status: 'failed', durationMs: Date.now() - started, output: `${error.stdout || ''}`.slice(-4000), error: error.message });
+        this.addEvent(review, { type: 'error', level: 'error', message: `${item.type} 失败 · ${error.message}` });
       }
     }
   }
@@ -345,8 +352,19 @@ export class ImpactReviewService {
 
   private analyzeImpact(files: ChangedFile[], diff: string): ImpactArea[] {
     const groups = new Map<string, ImpactArea>();
+    const details: Record<string, { affected: string; recommendedChecks: string[] }> = {
+      '认证与权限': { affected: '登录、Token、会话和角色权限边界', recommendedChecks: ['未登录访问', 'Token 过期', '低权限用户访问高权限页面'] },
+      '接口兼容性': { affected: '页面调用的接口参数、响应结构和错误处理', recommendedChecks: ['正常响应', '空数据/错误响应', '旧参数兼容'] },
+      '数据与迁移': { affected: '数据库结构、查询结果和存量数据读写', recommendedChecks: ['迁移执行', '旧数据读取', '新增/更新/删除链路'] },
+      '核心业务链路': { affected: '订单、计费、价格和资金相关操作', recommendedChecks: ['主流程', '重复提交', '异常回滚'] },
+      '发布与配置': { affected: '构建产物、运行时配置和部署行为', recommendedChecks: ['构建', '环境变量', '发布后健康检查'] },
+      '测试覆盖': { affected: '已有测试是否覆盖本次改动', recommendedChecks: ['相关单测', '集成测试', '回归测试'] },
+      '前端交互': { affected: '页面组件、样式和用户点击行为', recommendedChecks: ['页面加载', '关键点击', '不同视口'] },
+      '大范围变更': { affected: '变更范围较大导致的连带回归风险', recommendedChecks: ['全量构建', '核心链路回归', '性能基线'] },
+      '输入与代码安全': { affected: '用户输入、HTML 注入和命令执行边界', recommendedChecks: ['恶意输入', '权限绕过', '输出编码'] },
+    };
     const add = (name: string, reason: string, risk: ImpactArea['risk'], file: string) => {
-      const existing = groups.get(name) || { name, reason, risk, files: [] };
+      const existing = groups.get(name) || { name, reason, ...details[name], risk, files: [] };
       if (!existing.files.includes(file)) existing.files.push(file);
       if (risk === 'critical' || (risk === 'high' && existing.risk === 'medium')) existing.risk = risk;
       groups.set(name, existing);

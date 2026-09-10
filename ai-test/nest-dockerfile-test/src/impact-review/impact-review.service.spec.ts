@@ -8,6 +8,10 @@ describe('ImpactReviewService', () => {
       { status: 'M', path: 'db/migration.sql', additions: 3, deletions: 2 },
     ], '');
     expect(impact.map((item: any) => item.name)).toEqual(expect.arrayContaining(['认证与权限', '接口兼容性', '数据与迁移']));
+    expect(impact.find((item: any) => item.name === '认证与权限')).toMatchObject({
+      affected: expect.stringContaining('登录'),
+      recommendedChecks: expect.arrayContaining(['未登录访问']),
+    });
   });
 
   it('forces security testing for critical impact', () => {

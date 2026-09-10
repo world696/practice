@@ -52,6 +52,8 @@ export interface ChangedFile {
 export interface ImpactArea {
   name: string;
   reason: string;
+  affected: string;
+  recommendedChecks: string[];
   risk: 'low' | 'medium' | 'high' | 'critical';
   files: string[];
 }
