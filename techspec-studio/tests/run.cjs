@@ -1,0 +1,75 @@
+'use strict';
+const assert=require('assert');
+const fs=require('fs');
+const path=require('path');
+const {TextEncoder,TextDecoder}=require('util');
+const {JSDOM}=require('jsdom');
+const {IDBFactory}=require('fake-indexeddb');
+const domain=require('../dist/core.js');
+const base=path.resolve(__dirname,'../dist');
+const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+let checks=0;const watchdog=setTimeout(()=>{console.error('Test watchdog: an async operation did not complete');process.exit(1);},25000);
+function check(name,fn){fn();checks++;console.log('PASS',name);}
+async function until(fn){for(let i=0;i<100;i++){if(fn())return;await wait(30);}throw new Error('Timed out waiting for application state');}
+function boot(factory){
+ const dom=new JSDOM(fs.readFileSync(path.join(base,'index.html'),'utf8').replace(/<script[^>]*>[\s\S]*?<\/script>/g,'').replace(/<link[^>]*>/g,''),{url:'http://localhost:5178',runScripts:'dangerously',pretendToBeVisual:true});
+ const w=dom.window;w.TextEncoder=TextEncoder;w.TextDecoder=TextDecoder;w.structuredClone=global.structuredClone;w.indexedDB=factory;w.scrollTo=()=>{};
+ w.URL.createObjectURL=()=> 'blob:test';w.URL.revokeObjectURL=()=>{};w.HTMLAnchorElement.prototype.click=function(){w.lastDownload=this.download;};
+ for(const f of ['assets/jszip.min.js','assets/marked.min.js','assets/purify.min.js','assets/mammoth.browser.min.js','core.js','assets/mermaid.min.js','diagrams.js','app.js']){if(f==='app.js'){w.diagramRenderInputs=[];w.mermaid.render=async(id,source)=>{await w.mermaid.parse(source);w.diagramRenderInputs.push(source);return {svg:'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 30"><text x="5" y="20">图示</text><script>window.diagramInjected=true</script><a href="https://example.com"><text>外链</text></a></svg>'};};}const script=w.document.createElement('script');script.textContent=fs.readFileSync(path.join(base,f),'utf8');w.document.head.appendChild(script);}
+ w.JSZip=require('../dist/assets/jszip.min.js');w.mammoth=require('../dist/assets/mammoth.browser.min.js');return dom;
+}
+function file(w,name,text){const bytes=new TextEncoder().encode(text);return {name,size:bytes.length,text:async()=>text,arrayBuffer:async()=>{const array=new w.Uint8Array(bytes);return array.buffer;}};}
+(async()=>{
+ const example=domain.seed().projects[0];
+ for(const type of Object.keys(domain.TYPES))check('grounded '+type+' draft',()=>{const text=domain.generateDraft(example,type);assert(text.includes('结构化草稿'));for(const s of domain.DEFAULT_OUTLINE)assert(text.includes(s.title));for(const m of example.modules)assert(text.includes(m));assert(text.includes('collaboration-web/package.json'));if(type==='tests')assert(text.includes('TC-01-01'));});
+ for(const type of Object.keys(domain.TYPES))check(type+' draft is concise and contains editable diagrams',()=>{const text=domain.generateDraft(example,type);const previous={frontend:2164,backend:2566,tests:2968};assert(text.length<previous[type]*0.65);assert.strictEqual((text.match(/```mermaid/g)||[]).length,2);assert(!text.includes('页面与组件：将'));});
+ check('custom outline respects section order',()=>{const project=domain.createProject('Custom');project.outline=[{id:'custom-x',title:'部署与回滚',children:['回滚触发条件']},domain.clone(domain.DEFAULT_OUTLINE[0])];const text=domain.generateDraft(project,'backend');assert(text.indexOf('部署与回滚')<text.indexOf('相关文档'));assert(text.includes('回滚触发条件'));});
+ check('module extraction and evidence',()=>{assert.deepStrictEqual(domain.inferModules(example.files),example.modules);assert(domain.evidence(example).stack.includes('Vue'));});
+ check('endpoint validation',()=>{assert.strictEqual(domain.normalizeEndpoint('https://example.com/v1/'),'https://example.com/v1/chat/completions');assert.strictEqual(domain.normalizeEndpoint('https://example.com/v1/chat/completions'),'https://example.com/v1/chat/completions');assert.throws(()=>domain.normalizeEndpoint('http://example.com/v1'));assert.throws(()=>domain.normalizeEndpoint('https://secret@example.com'));});
+ check('AI prompt bounds and source trust',()=>{const project=domain.clone(example);project.files=Array.from({length:30},(_,i)=>({name:i+'.ts',path:i+'.ts',kind:'code',text:'x'.repeat(10000)}));const prompt=domain.buildPrompt(project,'frontend',2000);assert(prompt.length<6500);assert(prompt.includes('本文件截断'));assert(prompt.includes('不可信业务资料'));});
+ const factory=new IDBFactory();const dom=boot(factory),w=dom.window;await until(()=>w.document.querySelector('.studio-grid'));
+ const click=selector=>{const el=w.document.querySelector(selector);assert(el,'Missing element: '+selector);el.click();};
+ const input=(selector,value)=>{const el=w.document.querySelector(selector);assert(el,'Missing input: '+selector);el.value=value;el.dispatchEvent(new w.Event('input',{bubbles:true}));};
+ check('workspace boots with preview and real sample sources',()=>{assert.strictEqual(w.document.querySelectorAll('.file-row').length,2);assert(w.document.querySelector('.preview-panel').textContent.includes('示例预览'));assert.strictEqual(w.document.querySelectorAll('.type-card.selected').length,1);});
+ await w.SpecFlowDiagrams.renderAll();
+ check('real Mermaid parser accepts generated diagrams and hydration sanitizes SVG',()=>{assert.strictEqual(w.document.querySelectorAll('.diagram-block[data-rendered="ready"]').length,2);assert(w.diagramRenderInputs.length>=2);assert.strictEqual(w.document.querySelectorAll('.diagram-block svg script,.diagram-block svg a').length,0);assert.strictEqual(w.diagramInjected,undefined);});
+ let parsedDiagrams=0;for(const type of Object.keys(domain.TYPES)){for(const match of domain.generateDraft(example,type).matchAll(/```mermaid\n([\s\S]*?)```/g)){await w.mermaid.parse(match[1]);parsedDiagrams++;}}
+ check('every artifact architecture and schedule passes the real Mermaid parser',()=>assert.strictEqual(parsedDiagrams,6));
+ check('diagram safety gate rejects directives, HTML and remote images',()=>{assert(!w.SpecFlowDiagrams.allowed('flowchart TB\n A["x"]\n click A "https://evil.example"'));assert(!w.SpecFlowDiagrams.allowed('%%{init:{}}%%\nflowchart TB\n A["x"]'));assert(!w.SpecFlowDiagrams.allowed('flowchart TB\n A["<img src=x>"]'));});
+ click('[data-action="type"][data-type="backend"]');click('[data-action="type"][data-type="tests"]');click('[data-action="generate"]');await until(()=>w.eval('data.history.length')===3&&w.document.querySelector('.preview-panel').textContent.includes('已生成'));
+ check('multi-artifact generation saves independent records',()=>{assert.strictEqual(w.eval('data.history.length'),3);assert.strictEqual(w.document.querySelectorAll('.preview-toolbar [data-action="preview-type"]').length,3);});
+ check('generated Markdown export preserves Mermaid source',()=>assert(w.eval('output()').includes('```mermaid')));
+ click('[data-action="preview-mode"][data-mode="edit"]');input('#raw-preview','# 自定义编辑\n\n编辑后的方案');await w.eval('persistQueue');
+ check('Markdown edits update current history record',()=>assert(w.eval('data.history[0].text').includes('编辑后的方案')));
+ click('[data-action="export"]');check('Markdown export has correct filename',()=>assert(w.lastDownload.endsWith('前端技术方案.md')));
+ click('[data-action="outline"]');input('[data-section-title="0"]','项目参考资料');click('[data-action="add-section"]');input('[data-section-title="4"]','部署计划');input('[data-section-children="4"]','环境检查、回滚策略');input('#template-name','团队模板');click('[data-action="save-outline"]');
+ check('custom directory and reusable template persist',()=>{assert.strictEqual(w.eval('p().outline.length'),5);assert.strictEqual(w.eval('data.templates[0].name'),'团队模板');assert(w.document.querySelector('.directory-box').textContent.includes('部署计划'));});
+ click('[data-action="new"]');input('#project-name','客户中心<script>alert(1)</script>');click('[data-action="create-project"]');
+ check('new project is isolated and names are escaped',()=>{assert.strictEqual(w.eval('p().files.length'),0);assert.strictEqual(w.eval('p().results.frontend'),undefined);assert.strictEqual(w.document.querySelectorAll('#app script').length,0);});
+ await w.importSources([file(w,'需求.md','# 客户中心\n\n## 客户档案\n客户名称必填，支持新增与编辑。\n\n## 线索管理\n线索可分配给指定负责人。')],'docs');
+ check('real document import extracts modules',()=>{assert.strictEqual(w.eval('p().files.length'),1);assert.deepStrictEqual(Array.from(w.eval('p().modules')),['客户档案','线索管理']);});
+ console.log('CHECK ZIP parser');const zip=new w.JSZip();zip.file('src/customer.ts','export const customer = true;');zip.file('node_modules/ignore.js','secret');zip.file('.env','SECRET=private');zip.file('dist/build.js','build');const bytes=await zip.generateAsync({type:'uint8array'});const zipFile={name:'project.zip',size:bytes.length,arrayBuffer:async()=>bytes.buffer};
+ await w.importSources([zipFile],'code');
+ check('ZIP parser reads source and filters sensitive/generated files',()=>{assert.strictEqual(w.eval('p().files.filter(f=>f.kind==="code").length'),1);assert(w.eval('p().files.some(f=>f.path==="src/customer.ts")'));assert(!w.eval('p().files.some(f=>f.path.includes(".env"))'));});
+ const wordZip=new w.JSZip();wordZip.file('[Content_Types].xml','<?xml version="1.0"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>');wordZip.file('_rels/.rels','<?xml version="1.0"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');wordZip.file('word/document.xml','<?xml version="1.0"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>客户导出需求：仅管理员可以导出客户信息。</w:t></w:r></w:p></w:body></w:document>');const wordBytes=await wordZip.generateAsync({type:'uint8array'});await w.importSources([{name:'需求补充.docx',size:wordBytes.length,arrayBuffer:async()=>wordBytes.buffer}],'docs');
+ check('Word parser extracts actual DOCX text',()=>assert(w.eval('p().files.some(f=>f.text.includes("仅管理员可以导出"))')));
+ const pdfjs=require('../dist/assets/pdf.min.js');pdfjs.GlobalWorkerOptions.workerSrc=path.join(base,'assets/pdf.worker.min.js');
+ w.pdfjsLib={GlobalWorkerOptions:{},getDocument:options=>pdfjs.getDocument({...options,data:new Uint8Array(options.data),useSystemFonts:true})};
+ const stream='BT /F1 12 Tf 72 720 Td (PDF requirement: customer name is required.) Tj ET';
+ const objects=['<< /Type /Catalog /Pages 2 0 R >>','<< /Type /Pages /Kids [3 0 R] /Count 1 >>','<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>','<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>','<< /Length '+stream.length+' >>\nstream\n'+stream+'\nendstream'];
+ let pdfText='%PDF-1.4\n';const offsets=[0];for(let i=0;i<objects.length;i++){offsets.push(Buffer.byteLength(pdfText));pdfText+=(i+1)+' 0 obj\n'+objects[i]+'\nendobj\n';}const xref=Buffer.byteLength(pdfText);pdfText+='xref\n0 6\n0000000000 65535 f \n'+offsets.slice(1).map(offset=>String(offset).padStart(10,'0')+' 00000 n \n').join('')+'trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n'+xref+'\n%%EOF';
+ await w.importSources([file(w,'requirements.pdf',pdfText)],'docs');
+ check('PDF parser extracts actual text from a PDF document',()=>assert(w.eval('p().files.some(f=>f.name==="requirements.pdf"&&f.text.includes("customer name is required"))')));
+ check('untrusted Markdown is sanitized',()=>{const html=w.renderMarkdown('<script>window.pwned=true</script><img src=x onerror="alert(1)">[bad](javascript:alert(1))');assert(!html.includes('<script'));assert(!html.includes('onerror'));assert(!/href=["']javascript:/i.test(html));});
+ click('[data-action="settings"]');input('#api-endpoint','https://model.example/v1');input('#api-model','test-model');input('#api-key','session-only-test-key');click('[data-action="save-settings"]');
+ let captured=null;w.fetch=async(url,options)=>{captured={url,options};return {ok:true,json:async()=>({choices:[{finish_reason:'stop',message:{content:'# AI 方案\n\n客户中心的智能技术方案'}}]})};};
+ click('[data-action="generate"]');await until(()=>w.eval('data.history.length')===4&&w.document.querySelector('.preview-panel').textContent.includes('AI 方案'));
+ check('AI generation sends selected real context to configured endpoint',()=>{assert.strictEqual(captured.url,'https://model.example/v1/chat/completions');assert(JSON.parse(captured.options.body).messages[1].content.includes('客户档案'));assert.strictEqual(w.eval('data.history[3].mode'),'ai');});
+ check('API key is never serialized in workspace data',()=>assert(!w.eval('JSON.stringify(data)').includes('session-only-test-key')));
+ w.fetch=async()=>{throw new TypeError('network error');};click('[data-action="generate"]');await until(()=>w.document.querySelector('#modal-title')?.textContent==='本次生成未完成');check('AI network failure does not silently generate a draft',()=>{assert.strictEqual(w.eval('data.history.length'),4);assert(w.document.querySelector('.modal-description').textContent.includes('跨域'));});click('[data-action="confirm-action"]');
+ await w.eval('persistQueue');
+ const restored=boot(factory);await until(()=>restored.window.document.querySelector('.studio-grid'));
+ check('browser-local project and history restore after reload',()=>{assert.strictEqual(restored.window.eval('data.history.length'),4);assert.strictEqual(restored.window.eval('p().files.length'),4);assert.strictEqual(restored.window.eval('apiKey'),'');assert.strictEqual(restored.window.eval('p().useAI'),false);assert.strictEqual(restored.window.eval('data.templates.length'),1);});
+ check('all static script assets exist',()=>{const html=fs.readFileSync(path.join(base,'index.html'),'utf8');for(const match of html.matchAll(/src="\/([^"]+)"/g))assert(fs.statSync(path.join(base,match[1])).size>0);});
+ dom.window.close();restored.window.close();clearTimeout(watchdog);console.log('\n'+checks+' meaningful checks passed.');
+})().catch(error=>{clearTimeout(watchdog);console.error(error);process.exitCode=1;});

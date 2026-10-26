@@ -1,0 +1,13 @@
+{
+  "name": "specflow-studio",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "node server.cjs",
+    "test": "node tests/run.cjs"
+  },
+  "devDependencies": {
+    "jsdom": "20.0.3",
+    "fake-indexeddb": "4.0.2"
+  }
+}
