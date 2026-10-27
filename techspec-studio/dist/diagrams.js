@@ -18,11 +18,12 @@ function prepare(html){
 }
 function initialize(){
  if(initialized)return;
- root.mermaid.initialize({startOnLoad:false,securityLevel:'strict',suppressErrorRendering:true,maxTextSize:12000,maxEdges:100,theme:'base',fontFamily:'Noto Sans SC, Segoe UI, sans-serif',themeVariables:{primaryColor:'#f2ecfc',primaryTextColor:'#665076',primaryBorderColor:'#baa4dc',lineColor:'#ac91c7',secondaryColor:'#f7f3fc',tertiaryColor:'#fcfaff',fontSize:'13px'},flowchart:{htmlLabels:false,curve:'linear',useMaxWidth:true,padding:13}});
+ root.mermaid.initialize({startOnLoad:false,securityLevel:'strict',htmlLabels:false,suppressErrorRendering:true,maxTextSize:12000,maxEdges:100,theme:'base',fontFamily:'Noto Sans SC, Segoe UI, sans-serif',themeVariables:{primaryColor:'#f2ecfc',primaryTextColor:'#665076',primaryBorderColor:'#baa4dc',lineColor:'#ac91c7',secondaryColor:'#f7f3fc',tertiaryColor:'#fcfaff',fontSize:'13px'},flowchart:{htmlLabels:false,curve:'linear',useMaxWidth:true,padding:13}});
  initialized=true;
 }
 function fallback(node,message){node.dataset.rendered='source';node.querySelector('figcaption').textContent=message+' · 源码已保留';}
 function renderAll(scope=document){
+ if(!scope)return queue;
  const nodes=Array.from(scope.querySelectorAll('.diagram-block:not([data-rendered])'));
  nodes.forEach((node,index)=>{
   node.dataset.rendered='pending';
@@ -35,8 +36,20 @@ function renderAll(scope=document){
     initialize();
     const result=await root.mermaid.render('sfdiagram'+(++counter),source);
     if(!node.isConnected)return;
-    const svg=root.DOMPurify.sanitize(result.svg,{USE_PROFILES:{svg:true,svgFilters:true},ADD_TAGS:['style'],FORBID_TAGS:['a','image','foreignObject','script','iframe'],FORBID_ATTR:['href','xlink:href']});
+    // Mermaid versions may still emit HTML labels. Convert label text before
+    // removing foreignObject; otherwise sanitization leaves empty rectangles.
+    const parsed=new DOMParser().parseFromString(result.svg,'image/svg+xml');
+    parsed.querySelectorAll('foreignObject').forEach(label=>{
+     const text=parsed.createElementNS('http://www.w3.org/2000/svg','text');
+     const width=Number(label.getAttribute('width'))||0,height=Number(label.getAttribute('height'))||0;
+     text.setAttribute('x',String((Number(label.getAttribute('x'))||0)+width/2));
+     text.setAttribute('y',String((Number(label.getAttribute('y'))||0)+height/2));
+     text.setAttribute('text-anchor','middle');text.setAttribute('dominant-baseline','central');text.setAttribute('fill','#665076');
+     text.textContent=label.textContent.trim();label.replaceWith(text);
+    });
+    const svg=root.DOMPurify.sanitize(new XMLSerializer().serializeToString(parsed.documentElement),{USE_PROFILES:{svg:true,svgFilters:true},ADD_TAGS:['style'],FORBID_TAGS:['a','image','foreignObject','script','iframe'],FORBID_ATTR:['href','xlink:href']});
     if(!svg.includes('<svg'))throw new Error('No diagram returned');
+    if(!new DOMParser().parseFromString(svg,'image/svg+xml').querySelector('text')?.textContent.trim())throw new Error('Diagram labels missing');
     node.querySelector('.diagram-canvas').innerHTML=svg;node.dataset.rendered='ready';
    }catch(error){if(node.isConnected)fallback(node,'图表暂无法绘制，可编辑源码后重试');}
   });

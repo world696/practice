@@ -1,0 +1,3 @@
+# Local caches, temporary checkouts and deployment archives
+/.npm-cache-*/
+/.tmp-*
